@@ -12,30 +12,45 @@ ENTRY_THRESHOLD = 85
 EXIT_THRESHOLD = 55
 
 # ==============================
-# LOAD DATA (SAFE)
+# LOAD DATA (ULTRA SAFE)
 # ==============================
 
 @st.cache_data
 def load_data():
-    tickers = ["USO", "XLE", "BNO"]  # BNO more stable than BWET
+    tickers = ["USO", "XLE", "BNO"]  # reliable set
 
     try:
-        data = yf.download(tickers, period="3mo", interval="1d")["Close"]
-        data = data.dropna()
+        data = yf.download(tickers, period="3mo", interval="1d")
 
-        if data.empty or len(data) < 5:
+        if data is None or data.empty:
+            return None
+
+        if "Close" not in data:
+            return None
+
+        data = data["Close"].dropna()
+
+        if data is None or data.empty:
             return None
 
         return data
 
-    except:
+    except Exception:
         return None
 
 
 data = load_data()
 
+# ==============================
+# DATA SAFETY CHECK
+# ==============================
+
 if data is None:
     st.error("❌ Failed to load market data. Try refreshing.")
+    st.stop()
+
+if len(data) < 10:
+    st.warning("⚠️ Not enough market data yet.")
     st.stop()
 
 # ==============================
@@ -57,7 +72,7 @@ def calculate_score(row, prev_row):
     else:
         score -= 10
 
-    # Brent proxy (BNO)
+    # Brent proxy
     bno_change = (row["BNO"] - prev_row["BNO"]) / prev_row["BNO"]
     if bno_change > 0.02:
         score += 5
@@ -72,50 +87,60 @@ def calculate_score(row, prev_row):
     return score
 
 # ==============================
-# BUILD SIGNALS (HOLD SYSTEM)
+# BUILD SIGNALS
 # ==============================
 
 position = 0
 signals = []
 
 for i in range(2, len(data)):
-    yesterday = data.iloc[i-1]
-    day_before = data.iloc[i-2]
+    try:
+        yesterday = data.iloc[i-1]
+        day_before = data.iloc[i-2]
 
-    score = calculate_score(yesterday, day_before)
+        score = calculate_score(yesterday, day_before)
 
-    prev_position = position
+        # ENTRY
+        if position == 0:
+            if score >= ENTRY_THRESHOLD:
+                position = 1
+            elif score <= (100 - ENTRY_THRESHOLD):
+                position = -1
 
-    # ENTRY (EXTREME ONLY)
-    if position == 0:
-        if score >= ENTRY_THRESHOLD:
-            position = 1
-        elif score <= (100 - ENTRY_THRESHOLD):
-            position = -1
+        # HOLD / EXIT
+        elif position == 1:
+            if score < EXIT_THRESHOLD:
+                position = 0
+            elif score <= (100 - ENTRY_THRESHOLD):
+                position = -1
 
-    # HOLD / EXIT
-    elif position == 1:
-        if score < EXIT_THRESHOLD:
-            position = 0
-        elif score <= (100 - ENTRY_THRESHOLD):
-            position = -1
+        elif position == -1:
+            if score > (100 - EXIT_THRESHOLD):
+                position = 0
+            elif score >= ENTRY_THRESHOLD:
+                position = 1
 
-    elif position == -1:
-        if score > (100 - EXIT_THRESHOLD):
-            position = 0
-        elif score >= ENTRY_THRESHOLD:
-            position = 1
+        signals.append({
+            "date": data.index[i],
+            "score": score,
+            "position": position
+        })
 
-    signals.append({
-        "date": data.index[i],
-        "score": score,
-        "position": position
-    })
+    except Exception:
+        continue
+
+# ==============================
+# CREATE DF SAFELY
+# ==============================
 
 df = pd.DataFrame(signals)
 
-if df.empty or len(df) < 2:
-    st.warning("⚠️ Not enough data to generate signal yet.")
+if df is None or df.empty:
+    st.warning("⚠️ No signals generated yet (data issue).")
+    st.stop()
+
+if len(df) < 2:
+    st.warning("⚠️ Not enough signal history yet.")
     st.stop()
 
 # ==============================
@@ -131,7 +156,7 @@ signal_map = {
     0: "⚪ NO POSITION"
 }
 
-# ACTION DETECTION
+# ACTION
 if latest["position"] != previous["position"]:
     if latest["position"] == 1:
         action = "🚀 ENTER LONG"
