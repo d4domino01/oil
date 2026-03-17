@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
 
-st.write("VERSION 5 (PRO MODEL)")
+st.write("VERSION 6 (EDGE MODEL)")
 
-ENTRY_THRESHOLD = 80
+ENTRY_THRESHOLD = 75
 EXIT_THRESHOLD = 55
 
 # ==============================
@@ -47,7 +47,7 @@ if data is None or data.empty or len(data) < 30:
     st.stop()
 
 # ==============================
-# TREND FILTER (KEY EDGE)
+# TREND
 # ==============================
 
 data["MA20"] = data["USO"].rolling(20).mean()
@@ -55,37 +55,71 @@ data["MA50"] = data["USO"].rolling(50).mean()
 
 def get_trend(row):
     if row["MA20"] > row["MA50"]:
-        return 1  # uptrend
+        return 1
     elif row["MA20"] < row["MA50"]:
-        return -1  # downtrend
-    else:
-        return 0
+        return -1
+    return 0
 
 # ==============================
-# SIGNAL ENGINE
+# CORE SCORE
 # ==============================
 
 def calc_score(a, b, trend):
     score = 50
 
-    # Core momentum
     score += 20 if a["USO"] > b["USO"] else -20
     score += 15 if a["XLE"] > b["XLE"] else -15
 
-    # Brent strength
     change = (a["BNO"] - b["BNO"]) / b["BNO"]
     if change > 0.015:
         score += 10
     elif change < -0.015:
         score -= 10
 
-    # Trend alignment boost
     if trend == 1:
         score += 10
     elif trend == -1:
         score -= 10
 
     return score
+
+# ==============================
+# PRE-OPEN SIGNAL (KEY EDGE)
+# ==============================
+
+def pre_open_signal(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    move = (last["USO"] - prev["USO"]) / prev["USO"]
+
+    if move > 0.01:
+        return "BULLISH"
+    elif move < -0.01:
+        return "BEARISH"
+    else:
+        return "NEUTRAL"
+
+# ==============================
+# EARLY MOMENTUM
+# ==============================
+
+def early_momentum(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    strength = abs((last["USO"] - prev["USO"]) / prev["USO"])
+
+    if strength > 0.02:
+        return "STRONG"
+    elif strength > 0.01:
+        return "MEDIUM"
+    else:
+        return "WEAK"
+
+# ==============================
+# SIGNAL ENGINE
+# ==============================
 
 signals = []
 position = 0
@@ -98,7 +132,7 @@ for i in range(50, len(data)):
         trend = get_trend(y)
         score = calc_score(y, d, trend)
 
-        # 🚨 NO TRADE FILTER
+        # NO TRADE ZONE
         if abs(score - 50) < 15:
             new_position = 0
 
@@ -145,47 +179,58 @@ latest = df.iloc[-1]
 previous = df.iloc[-2]
 
 # ==============================
-# ACTION
+# EXTRA EDGE SIGNALS
 # ==============================
 
-if latest["position"] != previous["position"]:
-    if latest["position"] == 1:
-        action = "🚀 STRONG BUY"
-    elif latest["position"] == -1:
-        action = "🔻 STRONG SELL"
-    else:
-        action = "❌ EXIT"
-else:
-    action = "⏳ HOLD"
+pre_signal = pre_open_signal(data)
+momentum = early_momentum(data)
+
+# ==============================
+# FINAL DECISION LOGIC
+# ==============================
 
 confidence = int(abs(latest["score"] - 50) * 2)
+
+if confidence > 70 and momentum != "WEAK":
+    if latest["trend"] == 1:
+        action = "🚀 HIGH PROBABILITY BUY"
+    elif latest["trend"] == -1:
+        action = "🔻 HIGH PROBABILITY SELL"
+else:
+    action = "⏳ NO TRADE"
 
 # ==============================
 # UI
 # ==============================
 
-st.title("🛢️ Oil Trading System (PRO)")
+st.title("🛢️ Oil Trading System (EDGE)")
 
 col1, col2, col3 = st.columns(3)
 
 col1.metric("Score", int(latest["score"]))
 col2.metric("Confidence", f"{confidence}%")
-
-trend_label = "UPTREND" if latest["trend"] == 1 else "DOWNTREND"
-col3.metric("Trend", trend_label)
+col3.metric("Trend", "UP" if latest["trend"] == 1 else "DOWN")
 
 st.markdown(f"## 🔥 ACTION: {action}")
 
 # ==============================
-# SIGNAL QUALITY
+# EDGE DISPLAY
 # ==============================
 
-if confidence > 70:
-    st.success("🔥 HIGH PROBABILITY TRADE")
-elif confidence > 50:
-    st.warning("⚠️ Medium strength")
+st.subheader("Pre-Open Signal (15:25 CET)")
+st.write(pre_signal)
+
+st.subheader("Early Momentum")
+st.write(momentum)
+
+# ==============================
+# QUALITY
+# ==============================
+
+if action.startswith("🚀") or action.startswith("🔻"):
+    st.success("🔥 TRADE ALLOWED")
 else:
-    st.info("No trade zone")
+    st.info("NO TRADE CONDITIONS")
 
 # ==============================
 # INFO
@@ -196,16 +241,15 @@ st.caption(f"Updated: {datetime.now()}")
 st.subheader("Recent Signals")
 st.dataframe(df.tail(10))
 
-st.subheader("Rules")
+st.subheader("How to Use")
 
 st.write("""
+15:25 → Check Pre-Open Signal  
+15:30 → Watch open  
+15:35 → Confirm momentum  
+
 ONLY trade when:
 - Confidence > 70
+- Momentum not WEAK
 - Trend aligns
-- Score extreme
-
-Avoid:
-- Low confidence (<50)
-- Mixed trend
-- Choppy markets
 """)
