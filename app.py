@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time
+from datetime import datetime
 
-st.write("VERSION 6 (EDGE MODEL)")
+st.write("VERSION 7 (FINAL MODEL)")
 
 ENTRY_THRESHOLD = 75
 EXIT_THRESHOLD = 55
@@ -32,9 +32,7 @@ def load_data():
         df = pd.concat([uso, xle, bno], axis=1)
         df.columns = ["USO", "XLE", "BNO"]
 
-        df = df.sort_index().dropna()
-
-        return df.tail(120)
+        return df.sort_index().dropna().tail(120)
 
     except:
         return None
@@ -42,7 +40,7 @@ def load_data():
 
 data = load_data()
 
-if data is None or data.empty or len(data) < 30:
+if data is None or data.empty or len(data) < 50:
     st.error("❌ Data issue")
     st.stop()
 
@@ -61,7 +59,7 @@ def get_trend(row):
     return 0
 
 # ==============================
-# CORE SCORE
+# SCORE
 # ==============================
 
 def calc_score(a, b, trend):
@@ -84,7 +82,7 @@ def calc_score(a, b, trend):
     return score
 
 # ==============================
-# PRE-OPEN SIGNAL (KEY EDGE)
+# PRE-OPEN
 # ==============================
 
 def pre_open_signal(df):
@@ -101,7 +99,7 @@ def pre_open_signal(df):
         return "NEUTRAL"
 
 # ==============================
-# EARLY MOMENTUM
+# MOMENTUM
 # ==============================
 
 def early_momentum(df):
@@ -118,11 +116,10 @@ def early_momentum(df):
         return "WEAK"
 
 # ==============================
-# SIGNAL ENGINE
+# BUILD SIGNALS
 # ==============================
 
 signals = []
-position = 0
 
 for i in range(50, len(data)):
     try:
@@ -132,38 +129,10 @@ for i in range(50, len(data)):
         trend = get_trend(y)
         score = calc_score(y, d, trend)
 
-        # NO TRADE ZONE
-        if abs(score - 50) < 15:
-            new_position = 0
-
-        else:
-            if position == 0:
-                if score >= ENTRY_THRESHOLD and trend == 1:
-                    new_position = 1
-                elif score <= (100 - ENTRY_THRESHOLD) and trend == -1:
-                    new_position = -1
-                else:
-                    new_position = 0
-
-            elif position == 1:
-                if score < EXIT_THRESHOLD:
-                    new_position = 0
-                else:
-                    new_position = 1
-
-            elif position == -1:
-                if score > (100 - EXIT_THRESHOLD):
-                    new_position = 0
-                else:
-                    new_position = -1
-
-        position = new_position
-
         signals.append({
             "date": data.index[i],
             "score": score,
-            "trend": trend,
-            "position": position
+            "trend": trend
         })
 
     except:
@@ -176,26 +145,42 @@ if df.empty or len(df) < 2:
     st.stop()
 
 latest = df.iloc[-1]
-previous = df.iloc[-2]
 
 # ==============================
-# EXTRA EDGE SIGNALS
+# EXTRA SIGNALS
 # ==============================
 
 pre_signal = pre_open_signal(data)
 momentum = early_momentum(data)
 
-# ==============================
-# FINAL DECISION LOGIC
-# ==============================
-
 confidence = int(abs(latest["score"] - 50) * 2)
 
-if confidence > 70 and momentum != "WEAK":
+# ==============================
+# FINAL DECISION ENGINE
+# ==============================
+
+# TREND TRADE
+if (
+    confidence > 70 and
+    ((latest["trend"] == 1 and latest["score"] > 70) or
+     (latest["trend"] == -1 and latest["score"] < 30))
+):
     if latest["trend"] == 1:
-        action = "🚀 HIGH PROBABILITY BUY"
-    elif latest["trend"] == -1:
-        action = "🔻 HIGH PROBABILITY SELL"
+        action = "🚀 TREND BUY"
+    else:
+        action = "🔻 TREND SELL"
+
+# BREAKOUT TRADE
+elif (
+    (pre_signal == "BULLISH" and momentum == "STRONG") or
+    (pre_signal == "BEARISH" and momentum == "STRONG")
+):
+    if pre_signal == "BULLISH":
+        action = "⚡ BREAKOUT BUY (smaller size)"
+    else:
+        action = "⚡ BREAKOUT SELL (smaller size)"
+
+# NO TRADE
 else:
     action = "⏳ NO TRADE"
 
@@ -203,34 +188,40 @@ else:
 # UI
 # ==============================
 
-st.title("🛢️ Oil Trading System (EDGE)")
+st.title("🛢️ Oil Trading System (FINAL)")
 
 col1, col2, col3 = st.columns(3)
 
 col1.metric("Score", int(latest["score"]))
 col2.metric("Confidence", f"{confidence}%")
-col3.metric("Trend", "UP" if latest["trend"] == 1 else "DOWN")
+
+trend_label = "UP" if latest["trend"] == 1 else "DOWN"
+col3.metric("Trend", trend_label)
 
 st.markdown(f"## 🔥 ACTION: {action}")
 
 # ==============================
-# EDGE DISPLAY
+# EXTRA INFO
 # ==============================
 
-st.subheader("Pre-Open Signal (15:25 CET)")
+st.subheader("Pre-Open Signal (15:25)")
 st.write(pre_signal)
 
 st.subheader("Early Momentum")
 st.write(momentum)
 
 # ==============================
-# QUALITY
+# TRADE TYPE INFO
 # ==============================
 
-if action.startswith("🚀") or action.startswith("🔻"):
-    st.success("🔥 TRADE ALLOWED")
+if "TREND" in action:
+    st.success("SAFE TREND TRADE")
+
+elif "BREAKOUT" in action:
+    st.warning("BREAKOUT TRADE → USE SMALL SIZE")
+
 else:
-    st.info("NO TRADE CONDITIONS")
+    st.info("NO EDGE → DO NOTHING")
 
 # ==============================
 # INFO
@@ -241,15 +232,18 @@ st.caption(f"Updated: {datetime.now()}")
 st.subheader("Recent Signals")
 st.dataframe(df.tail(10))
 
-st.subheader("How to Use")
+st.subheader("How to Trade This")
 
 st.write("""
-15:25 → Check Pre-Open Signal  
-15:30 → Watch open  
-15:35 → Confirm momentum  
+TREND TRADE:
+- Full size
+- High confidence
 
-ONLY trade when:
-- Confidence > 70
-- Momentum not WEAK
-- Trend aligns
+BREAKOUT TRADE:
+- Half size
+- Watch first 5–10 min
+- Exit quickly if fails
+
+NO TRADE:
+- Stay out
 """)
