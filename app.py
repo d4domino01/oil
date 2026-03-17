@@ -2,10 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-st.write("VERSION 7 (FINAL MODEL)")
+st.write("VERSION 8 (VOL + FUTURES EDGE)")
 
 ENTRY_THRESHOLD = 75
-EXIT_THRESHOLD = 55
 
 # ==============================
 # DATA (STOOQ)
@@ -40,7 +39,7 @@ def load_data():
 
 data = load_data()
 
-if data is None or data.empty or len(data) < 50:
+if data is None or len(data) < 50:
     st.error("❌ Data issue")
     st.stop()
 
@@ -59,6 +58,35 @@ def get_trend(row):
     return 0
 
 # ==============================
+# VOLATILITY FILTER (OVX STYLE)
+# ==============================
+
+data["USO_RET"] = data["USO"].pct_change()
+data["VOL"] = data["USO_RET"].rolling(10).std()
+
+def volatility_state(row):
+    if row["VOL"] > 0.025:
+        return "HIGH"
+    elif row["VOL"] > 0.015:
+        return "NORMAL"
+    else:
+        return "LOW"
+
+# ==============================
+# FUTURES LEAD (BNO MOMENTUM)
+# ==============================
+
+def futures_lead(a, b):
+    move = (a["BNO"] - b["BNO"]) / b["BNO"]
+
+    if move > 0.01:
+        return "BULLISH"
+    elif move < -0.01:
+        return "BEARISH"
+    else:
+        return "NEUTRAL"
+
+# ==============================
 # SCORE
 # ==============================
 
@@ -68,10 +96,10 @@ def calc_score(a, b, trend):
     score += 20 if a["USO"] > b["USO"] else -20
     score += 15 if a["XLE"] > b["XLE"] else -15
 
-    change = (a["BNO"] - b["BNO"]) / b["BNO"]
-    if change > 0.015:
+    bno_change = (a["BNO"] - b["BNO"]) / b["BNO"]
+    if bno_change > 0.015:
         score += 10
-    elif change < -0.015:
+    elif bno_change < -0.015:
         score -= 10
 
     if trend == 1:
@@ -82,41 +110,7 @@ def calc_score(a, b, trend):
     return score
 
 # ==============================
-# PRE-OPEN
-# ==============================
-
-def pre_open_signal(df):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    move = (last["USO"] - prev["USO"]) / prev["USO"]
-
-    if move > 0.01:
-        return "BULLISH"
-    elif move < -0.01:
-        return "BEARISH"
-    else:
-        return "NEUTRAL"
-
-# ==============================
-# MOMENTUM
-# ==============================
-
-def early_momentum(df):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    strength = abs((last["USO"] - prev["USO"]) / prev["USO"])
-
-    if strength > 0.02:
-        return "STRONG"
-    elif strength > 0.01:
-        return "MEDIUM"
-    else:
-        return "WEAK"
-
-# ==============================
-# BUILD SIGNALS
+# SIGNAL BUILD
 # ==============================
 
 signals = []
@@ -128,11 +122,15 @@ for i in range(50, len(data)):
 
         trend = get_trend(y)
         score = calc_score(y, d, trend)
+        vol = volatility_state(y)
+        lead = futures_lead(y, d)
 
         signals.append({
             "date": data.index[i],
             "score": score,
-            "trend": trend
+            "trend": trend,
+            "vol": vol,
+            "lead": lead
         })
 
     except:
@@ -140,18 +138,10 @@ for i in range(50, len(data)):
 
 df = pd.DataFrame(signals)
 
-if df.empty or len(df) < 2:
-    st.warning("⚠️ Not enough signals")
+if df.empty:
     st.stop()
 
 latest = df.iloc[-1]
-
-# ==============================
-# EXTRA SIGNALS
-# ==============================
-
-pre_signal = pre_open_signal(data)
-momentum = early_momentum(data)
 
 confidence = int(abs(latest["score"] - 50) * 2)
 
@@ -159,28 +149,30 @@ confidence = int(abs(latest["score"] - 50) * 2)
 # FINAL DECISION ENGINE
 # ==============================
 
-# TREND TRADE
+# 🚀 TREND TRADE
 if (
     confidence > 70 and
-    ((latest["trend"] == 1 and latest["score"] > 70) or
-     (latest["trend"] == -1 and latest["score"] < 30))
+    latest["vol"] != "LOW" and
+    latest["lead"] != "NEUTRAL"
 ):
     if latest["trend"] == 1:
         action = "🚀 TREND BUY"
-    else:
+    elif latest["trend"] == -1:
         action = "🔻 TREND SELL"
-
-# BREAKOUT TRADE
-elif (
-    (pre_signal == "BULLISH" and momentum == "STRONG") or
-    (pre_signal == "BEARISH" and momentum == "STRONG")
-):
-    if pre_signal == "BULLISH":
-        action = "⚡ BREAKOUT BUY (smaller size)"
     else:
-        action = "⚡ BREAKOUT SELL (smaller size)"
+        action = "⏳ NO TRADE"
 
-# NO TRADE
+# ⚡ BREAKOUT TRADE
+elif (
+    latest["vol"] == "HIGH" and
+    latest["lead"] != "NEUTRAL"
+):
+    if latest["lead"] == "BULLISH":
+        action = "⚡ BREAKOUT BUY (FAST MOVE)"
+    else:
+        action = "⚡ BREAKOUT SELL (FAST MOVE)"
+
+# ❌ NO TRADE
 else:
     action = "⏳ NO TRADE"
 
@@ -188,37 +180,33 @@ else:
 # UI
 # ==============================
 
-st.title("🛢️ Oil Trading System (FINAL)")
+st.title("🛢️ Oil Trading System (PRO EDGE)")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("Score", int(latest["score"]))
 col2.metric("Confidence", f"{confidence}%")
-
-trend_label = "UP" if latest["trend"] == 1 else "DOWN"
-col3.metric("Trend", trend_label)
+col3.metric("Trend", "UP" if latest["trend"] == 1 else "DOWN")
+col4.metric("Volatility", latest["vol"])
 
 st.markdown(f"## 🔥 ACTION: {action}")
 
 # ==============================
-# EXTRA INFO
+# EXTRA SIGNALS
 # ==============================
 
-st.subheader("Pre-Open Signal (15:25)")
-st.write(pre_signal)
-
-st.subheader("Early Momentum")
-st.write(momentum)
+st.subheader("Futures Lead (BNO)")
+st.write(latest["lead"])
 
 # ==============================
-# TRADE TYPE INFO
+# INTERPRETATION
 # ==============================
 
 if "TREND" in action:
-    st.success("SAFE TREND TRADE")
+    st.success("HIGH QUALITY TREND TRADE")
 
 elif "BREAKOUT" in action:
-    st.warning("BREAKOUT TRADE → USE SMALL SIZE")
+    st.warning("FAST MOVE → QUICK MANAGEMENT REQUIRED")
 
 else:
     st.info("NO EDGE → DO NOTHING")
@@ -232,17 +220,18 @@ st.caption(f"Updated: {datetime.now()}")
 st.subheader("Recent Signals")
 st.dataframe(df.tail(10))
 
-st.subheader("How to Trade This")
+st.subheader("Trading Rules")
 
 st.write("""
 TREND TRADE:
 - Full size
-- High confidence
+- Confidence > 70
+- Normal or High volatility
 
 BREAKOUT TRADE:
-- Half size
-- Watch first 5–10 min
-- Exit quickly if fails
+- Smaller size
+- High volatility required
+- Quick exits
 
 NO TRADE:
 - Stay out
