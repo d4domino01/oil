@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-st.write("VERSION 4 (STOOQ DATA)")
+st.write("VERSION 5 (PRO MODEL)")
 
-ENTRY_THRESHOLD = 85
+ENTRY_THRESHOLD = 80
 EXIT_THRESHOLD = 55
 
 # ==============================
-# DATA LOADER (STABLE - NO YAHOO)
+# DATA (STOOQ)
 # ==============================
 
 @st.cache_data
@@ -32,10 +32,9 @@ def load_data():
         df = pd.concat([uso, xle, bno], axis=1)
         df.columns = ["USO", "XLE", "BNO"]
 
-        df = df.sort_index()
-        df = df.dropna()
+        df = df.sort_index().dropna()
 
-        return df.tail(90)  # last ~3 months
+        return df.tail(120)
 
     except:
         return None
@@ -43,109 +42,117 @@ def load_data():
 
 data = load_data()
 
+if data is None or data.empty or len(data) < 30:
+    st.error("❌ Data issue")
+    st.stop()
+
 # ==============================
-# SAFETY CHECKS
+# TREND FILTER (KEY EDGE)
 # ==============================
 
-if data is None:
-    st.error("❌ Data failed to load (Stooq issue)")
-    st.stop()
+data["MA20"] = data["USO"].rolling(20).mean()
+data["MA50"] = data["USO"].rolling(50).mean()
 
-if data.empty:
-    st.error("❌ Data is empty")
-    st.stop()
-
-if len(data) < 10:
-    st.warning("⚠️ Not enough data yet")
-    st.stop()
+def get_trend(row):
+    if row["MA20"] > row["MA50"]:
+        return 1  # uptrend
+    elif row["MA20"] < row["MA50"]:
+        return -1  # downtrend
+    else:
+        return 0
 
 # ==============================
 # SIGNAL ENGINE
 # ==============================
 
-def calc_score(a, b):
+def calc_score(a, b, trend):
     score = 50
 
-    # USO momentum
-    score += 15 if a["USO"] > b["USO"] else -15
+    # Core momentum
+    score += 20 if a["USO"] > b["USO"] else -20
+    score += 15 if a["XLE"] > b["XLE"] else -15
 
-    # XLE confirmation
-    score += 10 if a["XLE"] > b["XLE"] else -10
-
-    # Brent proxy (BNO)
+    # Brent strength
     change = (a["BNO"] - b["BNO"]) / b["BNO"]
-    if change > 0.02:
-        score += 5
-    elif change < -0.02:
-        score -= 5
+    if change > 0.015:
+        score += 10
+    elif change < -0.015:
+        score -= 10
+
+    # Trend alignment boost
+    if trend == 1:
+        score += 10
+    elif trend == -1:
+        score -= 10
 
     return score
-
 
 signals = []
 position = 0
 
-for i in range(2, len(data)):
+for i in range(50, len(data)):
     try:
-        yesterday = data.iloc[i-1]
-        day_before = data.iloc[i-2]
+        y = data.iloc[i-1]
+        d = data.iloc[i-2]
 
-        score = calc_score(yesterday, day_before)
+        trend = get_trend(y)
+        score = calc_score(y, d, trend)
 
-        # ENTRY
-        if position == 0:
-            if score >= ENTRY_THRESHOLD:
-                position = 1
-            elif score <= 15:
-                position = -1
+        # 🚨 NO TRADE FILTER
+        if abs(score - 50) < 15:
+            new_position = 0
 
-        # HOLD / EXIT
-        elif position == 1:
-            if score < EXIT_THRESHOLD:
-                position = 0
+        else:
+            if position == 0:
+                if score >= ENTRY_THRESHOLD and trend == 1:
+                    new_position = 1
+                elif score <= (100 - ENTRY_THRESHOLD) and trend == -1:
+                    new_position = -1
+                else:
+                    new_position = 0
 
-        elif position == -1:
-            if score > 45:
-                position = 0
+            elif position == 1:
+                if score < EXIT_THRESHOLD:
+                    new_position = 0
+                else:
+                    new_position = 1
+
+            elif position == -1:
+                if score > (100 - EXIT_THRESHOLD):
+                    new_position = 0
+                else:
+                    new_position = -1
+
+        position = new_position
 
         signals.append({
             "date": data.index[i],
             "score": score,
+            "trend": trend,
             "position": position
         })
 
     except:
         continue
 
-
 df = pd.DataFrame(signals)
 
-# ==============================
-# FINAL SAFETY
-# ==============================
-
-if df is None or df.empty:
-    st.error("❌ No signals generated")
-    st.write("Data preview:", data.tail())
+if df.empty or len(df) < 2:
+    st.warning("⚠️ Not enough signals")
     st.stop()
-
-if len(df) < 2:
-    st.warning("⚠️ Not enough signals yet")
-    st.stop()
-
-# ==============================
-# CURRENT SIGNAL
-# ==============================
 
 latest = df.iloc[-1]
 previous = df.iloc[-2]
 
-# ACTION LOGIC
+# ==============================
+# ACTION
+# ==============================
+
 if latest["position"] != previous["position"]:
     if latest["position"] == 1:
-        action = "🚀 ENTER LONG"
+        action = "🚀 STRONG BUY"
     elif latest["position"] == -1:
-        action = "🔻 ENTER SHORT"
+        action = "🔻 STRONG SELL"
     else:
         action = "❌ EXIT"
 else:
@@ -157,57 +164,48 @@ confidence = int(abs(latest["score"] - 50) * 2)
 # UI
 # ==============================
 
-st.title("🛢️ Oil Trading System")
+st.title("🛢️ Oil Trading System (PRO)")
 
 col1, col2, col3 = st.columns(3)
 
 col1.metric("Score", int(latest["score"]))
 col2.metric("Confidence", f"{confidence}%")
 
-if latest["position"] == 1:
-    col3.metric("Position", "LONG")
-elif latest["position"] == -1:
-    col3.metric("Position", "SHORT")
-else:
-    col3.metric("Position", "NONE")
+trend_label = "UPTREND" if latest["trend"] == 1 else "DOWNTREND"
+col3.metric("Trend", trend_label)
 
 st.markdown(f"## 🔥 ACTION: {action}")
 
 # ==============================
-# SIGNAL STRENGTH
+# SIGNAL QUALITY
 # ==============================
 
-if latest["score"] >= ENTRY_THRESHOLD:
-    st.success("Strong BULLISH signal (EXTREME)")
-elif latest["score"] <= 15:
-    st.error("Strong BEARISH signal (EXTREME)")
+if confidence > 70:
+    st.success("🔥 HIGH PROBABILITY TRADE")
+elif confidence > 50:
+    st.warning("⚠️ Medium strength")
 else:
     st.info("No trade zone")
 
 # ==============================
-# TIME
+# INFO
 # ==============================
 
-st.caption(f"Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# ==============================
-# HISTORY
-# ==============================
+st.caption(f"Updated: {datetime.now()}")
 
 st.subheader("Recent Signals")
 st.dataframe(df.tail(10))
 
-# ==============================
-# RULES
-# ==============================
-
 st.subheader("Rules")
 
 st.write("""
-- Trade ONLY when score ≥ 85 or ≤ 15  
-- Enter at 15:30 CET  
-- Hold until:
-    - Score drops below 55  
-    - OR opposite signal  
-- Ignore weak signals  
+ONLY trade when:
+- Confidence > 70
+- Trend aligns
+- Score extreme
+
+Avoid:
+- Low confidence (<50)
+- Mixed trend
+- Choppy markets
 """)
