@@ -12,16 +12,31 @@ ENTRY_THRESHOLD = 85
 EXIT_THRESHOLD = 55
 
 # ==============================
-# LOAD DATA
+# LOAD DATA (SAFE)
 # ==============================
 
 @st.cache_data
 def load_data():
-    tickers = ["USO", "XLE", "BWET"]
-    data = yf.download(tickers, period="3mo", interval="1d")["Close"]
-    return data.dropna()
+    tickers = ["USO", "XLE", "BNO"]  # BNO more stable than BWET
+
+    try:
+        data = yf.download(tickers, period="3mo", interval="1d")["Close"]
+        data = data.dropna()
+
+        if data.empty or len(data) < 5:
+            return None
+
+        return data
+
+    except:
+        return None
+
 
 data = load_data()
+
+if data is None:
+    st.error("❌ Failed to load market data. Try refreshing.")
+    st.stop()
 
 # ==============================
 # SIGNAL ENGINE
@@ -42,11 +57,11 @@ def calculate_score(row, prev_row):
     else:
         score -= 10
 
-    # BWET (light)
-    bwet_change = (row["BWET"] - prev_row["BWET"]) / prev_row["BWET"]
-    if bwet_change > 0.03:
+    # Brent proxy (BNO)
+    bno_change = (row["BNO"] - prev_row["BNO"]) / prev_row["BNO"]
+    if bno_change > 0.02:
         score += 5
-    elif bwet_change < -0.03:
+    elif bno_change < -0.02:
         score -= 5
 
     # Volatility boost
@@ -57,18 +72,16 @@ def calculate_score(row, prev_row):
     return score
 
 # ==============================
-# BUILD SIGNALS (BIAS-FREE HOLD)
+# BUILD SIGNALS (HOLD SYSTEM)
 # ==============================
 
 position = 0
 signals = []
 
 for i in range(2, len(data)):
-    today = data.iloc[i]
     yesterday = data.iloc[i-1]
     day_before = data.iloc[i-2]
 
-    # IMPORTANT: use past data only
     score = calculate_score(yesterday, day_before)
 
     prev_position = position
@@ -101,6 +114,10 @@ for i in range(2, len(data)):
 
 df = pd.DataFrame(signals)
 
+if df.empty or len(df) < 2:
+    st.warning("⚠️ Not enough data to generate signal yet.")
+    st.stop()
+
 # ==============================
 # LATEST SIGNAL
 # ==============================
@@ -114,7 +131,7 @@ signal_map = {
     0: "⚪ NO POSITION"
 }
 
-# Detect action
+# ACTION DETECTION
 if latest["position"] != previous["position"]:
     if latest["position"] == 1:
         action = "🚀 ENTER LONG"
