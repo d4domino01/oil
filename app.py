@@ -1,39 +1,41 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-st.write("VERSION 3")
+st.write("VERSION 4 (STOOQ DATA)")
 
 ENTRY_THRESHOLD = 85
 EXIT_THRESHOLD = 55
 
 # ==============================
-# DATA LOADER (BULLETPROOF)
+# DATA LOADER (STABLE - NO YAHOO)
 # ==============================
 
 @st.cache_data
 def load_data():
-    # Try bulk first
     try:
-        data = yf.download(["USO", "XLE", "BNO"], period="3mo")["Close"]
+        uso = pd.read_csv(
+            "https://stooq.com/q/d/l/?s=uso.us&i=d",
+            parse_dates=["Date"]
+        ).set_index("Date")["Close"]
 
-        if data is not None and not data.empty:
-            return data.dropna()
+        xle = pd.read_csv(
+            "https://stooq.com/q/d/l/?s=xle.us&i=d",
+            parse_dates=["Date"]
+        ).set_index("Date")["Close"]
 
-    except:
-        pass
-
-    # Fallback (much more reliable)
-    try:
-        uso = yf.download("USO", period="3mo")["Close"]
-        xle = yf.download("XLE", period="3mo")["Close"]
-        bno = yf.download("BNO", period="3mo")["Close"]
+        bno = pd.read_csv(
+            "https://stooq.com/q/d/l/?s=bno.us&i=d",
+            parse_dates=["Date"]
+        ).set_index("Date")["Close"]
 
         df = pd.concat([uso, xle, bno], axis=1)
         df.columns = ["USO", "XLE", "BNO"]
 
-        return df.dropna()
+        df = df.sort_index()
+        df = df.dropna()
+
+        return df.tail(90)  # last ~3 months
 
     except:
         return None
@@ -46,11 +48,11 @@ data = load_data()
 # ==============================
 
 if data is None:
-    st.error("❌ Data failed to load (Yahoo issue)")
+    st.error("❌ Data failed to load (Stooq issue)")
     st.stop()
 
 if data.empty:
-    st.error("❌ Data is empty (Yahoo blocked or slow)")
+    st.error("❌ Data is empty")
     st.stop()
 
 if len(data) < 10:
