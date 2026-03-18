@@ -4,10 +4,10 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (TRUE CORE EDGE)")
+st.title("🛢️ Oil Trading System (CORE + DAILY DECISION)")
 
 # ==============================
-# DATA (STOOQ)
+# LOAD DATA
 # ==============================
 
 @st.cache_data
@@ -35,6 +35,22 @@ def load_data():
 data = load_data()
 
 # ==============================
+# DATA CHECK
+# ==============================
+
+st.subheader("📊 Data Status")
+
+latest_date = data.index[-1]
+days_old = (datetime.now() - latest_date).days
+
+st.write(f"Latest data date: {latest_date}")
+
+if days_old > 3:
+    st.warning(f"⚠️ Data is {days_old} days old")
+else:
+    st.success("✅ Data is recent")
+
+# ==============================
 # INDICATORS
 # ==============================
 
@@ -45,35 +61,7 @@ data["RET"] = data["USO"].pct_change()
 data["VOL"] = data["RET"].rolling(10).std()
 
 # ==============================
-# DATA HEALTH CHECK
-# ==============================
-
-st.subheader("📊 Data Status")
-
-if data is None or data.empty:
-    st.error("❌ No data loaded")
-    st.stop()
-
-latest_date = data.index[-1]
-
-st.write(f"Latest data date: {latest_date}")
-
-# Check if data is fresh (within last 3 days)
-from datetime import datetime
-
-days_old = (datetime.now() - latest_date).days
-
-if days_old > 3:
-    st.warning(f"⚠️ Data is {days_old} days old (may be outdated)")
-else:
-    st.success("✅ Data is recent")
-
-st.write("Last 5 rows:")
-st.dataframe(data.tail())
-
-
-# ==============================
-# FUNCTIONS (IDENTICAL TO BACKTEST)
+# FUNCTIONS
 # ==============================
 
 def get_trend(row):
@@ -119,7 +107,63 @@ def calculate_score(a, b, trend):
     return score, lead
 
 # ==============================
-# SIGNAL BUILD
+# DAILY DECISION (MAIN FEATURE)
+# ==============================
+
+y = data.iloc[-1]
+d = data.iloc[-2]
+
+trend = get_trend(y)
+score, lead = calculate_score(y, d, trend)
+vol = volatility_state(y)
+
+confidence = int(abs(score - 50) * 2)
+
+if (
+    confidence > 70 and
+    vol != "LOW" and
+    lead != "NEUTRAL"
+):
+    if trend == 1:
+        action = "🚀 TREND BUY"
+    else:
+        action = "🔻 TREND SELL"
+else:
+    action = "⏳ NO TRADE"
+
+# ==============================
+# DISPLAY MAIN DECISION
+# ==============================
+
+st.markdown("## 🛢️ TODAY’S TRADE DECISION")
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Action", action)
+col2.metric("Confidence", f"{confidence}%")
+col3.metric("Trend", "UP" if trend == 1 else "DOWN")
+
+# ==============================
+# BREAKDOWN
+# ==============================
+
+st.subheader("Signal Breakdown")
+
+st.write(f"Score: {score}")
+st.write(f"Volatility: {vol}")
+st.write(f"Futures Lead: {lead}")
+
+# ==============================
+# INTERPRETATION
+# ==============================
+
+if "BUY" in action or "SELL" in action:
+    st.success("High-confidence setup → Trade allowed")
+else:
+    st.info("No edge → Stay out")
+
+# ==============================
+# HISTORY
 # ==============================
 
 signals = []
@@ -132,75 +176,18 @@ for i in range(50, len(data)):
     score, lead = calculate_score(y, d, trend)
     vol = volatility_state(y)
 
+    confidence = abs(score - 50) * 2
+
     signals.append({
         "date": data.index[i],
         "score": score,
+        "confidence": confidence,
         "trend": trend,
         "vol": vol,
         "lead": lead
     })
 
 df = pd.DataFrame(signals)
-
-if df.empty:
-    st.error("No signals generated")
-    st.stop()
-
-latest = df.iloc[-1]
-
-confidence = int(abs(latest["score"] - 50) * 2)
-
-# ==============================
-# DECISION ENGINE (LOCKED)
-# ==============================
-
-if (
-    confidence > 70 and
-    latest["vol"] != "LOW" and
-    latest["lead"] != "NEUTRAL"
-):
-    if latest["trend"] == 1:
-        action = "🚀 TREND BUY"
-    else:
-        action = "🔻 TREND SELL"
-else:
-    action = "⏳ NO TRADE"
-
-# ==============================
-# UI
-# ==============================
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Score", int(latest["score"]))
-col2.metric("Confidence", f"{confidence}%")
-col3.metric("Trend", "UP" if latest["trend"] == 1 else "DOWN")
-col4.metric("Volatility", latest["vol"])
-
-st.markdown(f"## 🔥 ACTION: {action}")
-
-# ==============================
-# SIGNAL DETAILS
-# ==============================
-
-st.subheader("Signal Breakdown")
-
-st.write(f"Futures Lead: {latest['lead']}")
-st.write(f"Volatility: {latest['vol']}")
-
-# ==============================
-# INTERPRETATION
-# ==============================
-
-if "TREND" in action:
-    st.success("High-confidence setup → Full position")
-
-else:
-    st.info("No edge → Stay out")
-
-# ==============================
-# HISTORY
-# ==============================
 
 st.subheader("Recent Signals")
 st.dataframe(df.tail(10))
