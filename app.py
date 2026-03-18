@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (FULL PLATFORM)")
+st.title("🛢️ Oil Trading System (LONG ONLY)")
 
 # ==============================
 # LOAD DATA
@@ -33,20 +33,12 @@ def load_data():
 
     df = df.sort_index().dropna()
 
-    # 🔒 LOCK DATA
+    # LOCK DATA
     df = df.iloc[:-1]
 
     return df
 
 data = load_data()
-
-# ==============================
-# DATA STATUS
-# ==============================
-
-latest_date = data.index[-1]
-st.subheader("📊 Data Status")
-st.write(f"Using confirmed data up to: {latest_date}")
 
 # ==============================
 # INDICATORS
@@ -122,8 +114,8 @@ for i in range(50, len(data)):
     cond_vol = vol != "LOW"
     cond_lead = lead != "NEUTRAL"
 
-    if cond_conf and cond_vol and cond_lead:
-        action = "BUY" if trend == 1 else "SELL"
+    if cond_conf and cond_vol and cond_lead and trend == 1:
+        action = "BUY"
     else:
         action = "NO TRADE"
 
@@ -143,12 +135,11 @@ signals_df = pd.DataFrame(signals)
 latest = signals_df.iloc[-1]
 
 st.markdown("## 🛢️ TODAY’S SIGNAL")
-
 st.metric("Action", latest["action"])
 st.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# TRADE SIMULATION
+# TRADE SIMULATION (LONG ONLY)
 # ==============================
 
 capital = 10000
@@ -162,25 +153,20 @@ for i in range(1, len(signals_df)):
     row = signals_df.iloc[i]
     price = data.iloc[i]["USO"]
 
-    prev_position = position
-
     if position == 0:
         if row["action"] == "BUY":
             position = 1
             entry_price = price
-            trade_log.append({"Date": row["date"], "Type": "BUY", "Entry": price})
+            trade_log.append({
+                "Date": row["date"],
+                "Type": "BUY",
+                "Entry": price
+            })
 
-        elif row["action"] == "SELL":
-            position = -1
-            entry_price = price
-            trade_log.append({"Date": row["date"], "Type": "SELL", "Entry": price})
-
-    else:
+    elif position == 1:
         if row["action"] == "NO TRADE":
             exit_price = price
             pnl = (exit_price - entry_price) / entry_price
-            if position == -1:
-                pnl *= -1
 
             capital *= (1 + pnl)
 
