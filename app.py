@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (FINAL LOCKED VERSION)")
+st.title("🛢️ Oil Trading System (FULL PLATFORM)")
 
 # ==============================
 # LOAD DATA
@@ -32,7 +33,7 @@ def load_data():
 
     df = df.sort_index().dropna()
 
-    # 🔒 CRITICAL FIX: remove latest unstable row
+    # 🔒 LOCK DATA
     df = df.iloc[:-1]
 
     return df
@@ -44,16 +45,8 @@ data = load_data()
 # ==============================
 
 latest_date = data.index[-1]
-days_old = (datetime.now() - latest_date).days
-
-st.subheader("📊 Data Status (LOCKED DATA)")
-
+st.subheader("📊 Data Status")
 st.write(f"Using confirmed data up to: {latest_date}")
-
-if days_old > 3:
-    st.warning(f"⚠️ Data is {days_old} days old")
-else:
-    st.success("✅ Data is stable and confirmed")
 
 # ==============================
 # INDICATORS
@@ -61,7 +54,6 @@ else:
 
 data["MA20"] = data["USO"].rolling(20).mean()
 data["MA50"] = data["USO"].rolling(50).mean()
-
 data["RET"] = data["USO"].pct_change()
 data["VOL"] = data["RET"].rolling(10).std()
 
@@ -84,18 +76,16 @@ def volatility_state(row):
 def futures_lead(a, b):
     uso_move = (a["USO"] - b["USO"]) / b["USO"]
     bno_move = (a["BNO"] - b["BNO"]) / b["BNO"]
-
     divergence = bno_move - uso_move
 
     if divergence > 0.012:
-        return "BULLISH", divergence
+        return "BULLISH"
     elif divergence < -0.012:
-        return "BEARISH", divergence
-    return "NEUTRAL", divergence
+        return "BEARISH"
+    return "NEUTRAL"
 
 def calculate_score(a, b, trend, lead):
     score = 50
-
     score += 20 if a["USO"] > b["USO"] else -20
     score += 15 if a["XLE"] > b["XLE"] else -15
 
@@ -112,149 +102,139 @@ def calculate_score(a, b, trend, lead):
     return score
 
 # ==============================
-# SIGNAL CALCULATION
+# SIGNAL ENGINE
 # ==============================
 
-y = data.iloc[-1]   # confirmed yesterday
-d = data.iloc[-2]   # day before
+signals = []
 
-trend = get_trend(y)
-lead, divergence = futures_lead(y, d)
-vol = volatility_state(y)
+for i in range(50, len(data)):
+    y = data.iloc[i-1]
+    d = data.iloc[i-2]
 
-score = calculate_score(y, d, trend, lead)
+    trend = get_trend(y)
+    lead = futures_lead(y, d)
+    vol = volatility_state(y)
 
-confidence = int(min(abs(score - 50) * 2, 100))
+    score = calculate_score(y, d, trend, lead)
+    confidence = int(min(abs(score - 50) * 2, 100))
 
-# CONDITIONS
-cond_conf = confidence > 70
-cond_vol = vol != "LOW"
-cond_lead = lead != "NEUTRAL"
+    cond_conf = confidence > 70
+    cond_vol = vol != "LOW"
+    cond_lead = lead != "NEUTRAL"
 
-# ==============================
-# FINAL DECISION
-# ==============================
+    if cond_conf and cond_vol and cond_lead:
+        action = "BUY" if trend == 1 else "SELL"
+    else:
+        action = "NO TRADE"
 
-if cond_conf and cond_vol and cond_lead:
-    action = "🚀 TREND BUY" if trend == 1 else "🔻 TREND SELL"
-    reason = "All conditions aligned"
-else:
-    action = "⏳ NO TRADE"
+    signals.append({
+        "date": data.index[i],
+        "action": action,
+        "score": score,
+        "confidence": confidence
+    })
 
-    failed = []
-    if not cond_conf: failed.append("Confidence < 70")
-    if not cond_vol: failed.append("Low volatility")
-    if not cond_lead: failed.append("No futures confirmation")
-
-    reason = " | ".join(failed)
+signals_df = pd.DataFrame(signals)
 
 # ==============================
-# DISPLAY
+# CURRENT SIGNAL
 # ==============================
 
-st.markdown("## 🛢️ TODAY’S TRADE DECISION")
+latest = signals_df.iloc[-1]
 
-col1, col2, col3 = st.columns(3)
+st.markdown("## 🛢️ TODAY’S SIGNAL")
 
-col1.metric("Action", action)
-col2.metric("Confidence", f"{confidence}%")
-col3.metric("Trend", "UP" if trend == 1 else "DOWN")
-
-st.markdown(f"### 🧠 Reason: {reason}")
+st.metric("Action", latest["action"])
+st.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# BREAKDOWN
+# TRADE SIMULATION
 # ==============================
 
-st.subheader("Signal Breakdown")
+capital = 10000
+position = 0
+entry_price = 0
 
-st.write(f"Score: {score}")
-st.write(f"Volatility: {vol}")
-st.write(f"Futures Lead: {lead}")
-st.write(f"Divergence: {round(divergence, 5)}")
+trade_log = []
+equity = []
+
+for i in range(1, len(signals_df)):
+    row = signals_df.iloc[i]
+    price = data.iloc[i]["USO"]
+
+    prev_position = position
+
+    if position == 0:
+        if row["action"] == "BUY":
+            position = 1
+            entry_price = price
+            trade_log.append({"Date": row["date"], "Type": "BUY", "Entry": price})
+
+        elif row["action"] == "SELL":
+            position = -1
+            entry_price = price
+            trade_log.append({"Date": row["date"], "Type": "SELL", "Entry": price})
+
+    else:
+        if row["action"] == "NO TRADE":
+            exit_price = price
+            pnl = (exit_price - entry_price) / entry_price
+            if position == -1:
+                pnl *= -1
+
+            capital *= (1 + pnl)
+
+            trade_log[-1]["Exit"] = exit_price
+            trade_log[-1]["PnL %"] = round(pnl * 100, 2)
+
+            position = 0
+
+    equity.append(capital)
 
 # ==============================
-# CONDITION CHECK
+# PERFORMANCE
 # ==============================
 
-st.subheader("Condition Check")
+st.subheader("📊 Performance")
 
-st.write(f"Confidence > 70: {'✅' if cond_conf else '❌'}")
-st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
-st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
+if trade_log:
+    trades_df = pd.DataFrame(trade_log)
+
+    wins = len(trades_df[trades_df["PnL %"] > 0])
+    total = len(trades_df)
+
+    win_rate = (wins / total) * 100 if total > 0 else 0
+    total_return = (capital / 10000 - 1) * 100
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Return", f"{round(total_return,2)}%")
+    col2.metric("Trades", total)
+    col3.metric("Win Rate", f"{round(win_rate,2)}%")
+
+    st.subheader("📅 Trade Log")
+    st.dataframe(trades_df.tail(10))
 
 # ==============================
-# DEBUG
+# EQUITY CURVE
 # ==============================
 
-with st.expander("🔍 Debug"):
-    st.write("Score:", score)
-    st.write("Confidence:", confidence)
-    st.write("Divergence:", divergence)
-    st.write("Lead:", lead)
+st.subheader("📈 Equity Curve")
+
+fig, ax = plt.subplots()
+ax.plot(equity)
+ax.set_title("Equity Curve")
+st.pyplot(fig)
+
+# ==============================
+# SIGNAL HISTORY
+# ==============================
+
+st.subheader("📅 Signal History")
+st.dataframe(signals_df.tail(20))
 
 # ==============================
 # FOOTER
 # ==============================
 
 st.caption(f"Updated: {datetime.now()}")
-
-# ==============================
-# SIGNAL CONSISTENCY CHECK (SAFE)
-# ==============================
-
-st.subheader("📊 Signal Consistency Check")
-
-# --- LIVE SIGNAL (already calculated above) ---
-live_action = action
-
-# --- BACKTEST STYLE CALCULATION ---
-# simulate how backtest would calculate signal for SAME date
-
-y_bt = data.iloc[-1]
-d_bt = data.iloc[-2]
-
-trend_bt = get_trend(y_bt)
-lead_bt, _ = futures_lead(y_bt, d_bt)
-vol_bt = volatility_state(y_bt)
-
-score_bt = calculate_score(y_bt, d_bt, trend_bt, lead_bt)
-confidence_bt = int(min(abs(score_bt - 50) * 2, 100))
-
-cond_conf_bt = confidence_bt > 70
-cond_vol_bt = vol_bt != "LOW"
-cond_lead_bt = lead_bt != "NEUTRAL"
-
-if cond_conf_bt and cond_vol_bt and cond_lead_bt:
-    backtest_action = "🚀 TREND BUY" if trend_bt == 1 else "🔻 TREND SELL"
-else:
-    backtest_action = "⏳ NO TRADE"
-
-# ==============================
-# COMPARE
-# ==============================
-
-col1, col2 = st.columns(2)
-
-col1.metric("Live Signal", live_action)
-col2.metric("Backtest Signal", backtest_action)
-
-# RESULT
-if live_action == backtest_action:
-    st.success("✅ MATCH — System is consistent")
-else:
-    st.error("⚠️ MISMATCH — Investigate (data or logic drift)")
-
-# ==============================
-# EXTRA DEBUG (OPTIONAL)
-# ==============================
-
-with st.expander("🔍 Signal Comparison Debug"):
-    st.write("Live Score:", score)
-    st.write("Backtest Score:", score_bt)
-
-    st.write("Live Confidence:", confidence)
-    st.write("Backtest Confidence:", confidence_bt)
-
-    st.write("Live Lead:", lead)
-    st.write("Backtest Lead:", lead_bt)
