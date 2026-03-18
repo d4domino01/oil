@@ -1,62 +1,55 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import yfinance as yf
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Strategy (Clean Long-Only System)")
+st.title("🛢️ Oil Strategy (Stooq Version — Stable)")
 
 # ==============================
-# LOAD DATA (ROBUST + FALLBACK)
+# LOAD DATA (STOOQ)
 # ==============================
 
 @st.cache_data
 def load_data():
-    try:
-        # Try BWET first (your original system)
-        df = yf.download(["USO", "XLE", "BWET"], period="2y")["Close"]
+    uso = pd.read_csv(
+        "https://stooq.com/q/d/l/?s=uso.us&i=d",
+        parse_dates=["Date"]
+    ).set_index("Date")["Close"]
 
-        if df is None or df.empty or "BWET" not in df.columns:
-            raise Exception("BWET failed")
+    xle = pd.read_csv(
+        "https://stooq.com/q/d/l/?s=xle.us&i=d",
+        parse_dates=["Date"]
+    ).set_index("Date")["Close"]
 
-        df = df.dropna(subset=["USO", "XLE"])
+    bno = pd.read_csv(
+        "https://stooq.com/q/d/l/?s=bno.us&i=d",
+        parse_dates=["Date"]
+    ).set_index("Date")["Close"]
 
-        # Forward fill BWET gaps
-        df["BWET"] = df["BWET"].ffill()
+    df = pd.concat([uso, xle, bno], axis=1)
+    df.columns = ["USO", "XLE", "BWET"]  # keep naming consistent
 
-        source = "BWET"
+    df = df.sort_index().dropna()
 
-    except:
-        # Fallback to BNO (stable)
-        df = yf.download(["USO", "XLE", "BNO"], period="2y")["Close"]
-        df = df.dropna()
-
-        df.rename(columns={"BNO": "BWET"}, inplace=True)
-
-        source = "BNO (fallback)"
-
-    # SHIFT (no lookahead)
+    # SHIFT (NO LOOKAHEAD)
     df["USO_prev"] = df["USO"].shift(1)
     df["XLE_prev"] = df["XLE"].shift(1)
     df["BWET_prev"] = df["BWET"].shift(1)
 
     df = df.dropna()
 
-    return df, source
+    return df
 
-
-data, source = load_data()
+data = load_data()
 
 # ==============================
 # FAIL SAFE
 # ==============================
 
 if data is None or len(data) < 10:
-    st.error("❌ Data still invalid")
+    st.error("❌ Data issue")
     st.stop()
-
-st.caption(f"Data source: {source}")
 
 # ==============================
 # SCORE FUNCTION (UNCHANGED)
