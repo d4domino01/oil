@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (LOCKED CORE SYSTEM)")
+st.title("🛢️ Oil Trading System (CORE + FOLLOW-THROUGH)")
 
 # ==============================
 # LOAD DATA
@@ -63,7 +62,7 @@ data["VOL"] = data["RET"].rolling(10).std()
 data = data.dropna()
 
 # ==============================
-# FUNCTIONS (LOCKED EXACT)
+# FUNCTIONS (LOCKED)
 # ==============================
 
 def get_trend(row):
@@ -82,7 +81,6 @@ def futures_lead(a, b):
 
     divergence = bno_move - uso_move
 
-    # 🔒 HARD LOCK (prevents flip bug)
     if divergence > 0.012:
         return "BULLISH", divergence
     elif divergence < -0.012:
@@ -107,8 +105,16 @@ def calculate_score(a, b, trend, lead):
 
     return score
 
+# 🔥 FOLLOW-THROUGH FUNCTION
+def follow_through(today, yesterday):
+    move = (today["USO"] - yesterday["USO"]) / yesterday["USO"]
+
+    if today["USO"] >= yesterday["USO"] and move > -0.003:
+        return True, move
+    return False, move
+
 # ==============================
-# DAILY DECISION (LOCKED)
+# DAILY DECISION
 # ==============================
 
 y = data.iloc[-1]   # yesterday
@@ -120,7 +126,6 @@ vol = volatility_state(y)
 
 score = calculate_score(y, d, trend, lead)
 
-# 🔒 FIXED CONFIDENCE
 confidence = int(min(abs(score - 50) * 2, 100))
 
 # CONDITIONS
@@ -128,13 +133,24 @@ cond_conf = confidence > 70
 cond_vol = vol != "LOW"
 cond_lead = lead != "NEUTRAL"
 
+# 🔥 FOLLOW-THROUGH (IMPORTANT)
+today = data.iloc[-1]
+yesterday = data.iloc[-2]
+
+cond_follow, today_move = follow_through(today, yesterday)
+
 # ==============================
-# FINAL DECISION (EXACT MATCH)
+# FINAL DECISION
 # ==============================
 
-if cond_conf and cond_vol and cond_lead:
+if cond_conf and cond_vol and cond_lead and cond_follow:
     action = "🚀 TREND BUY" if trend == 1 else "🔻 TREND SELL"
-    reason = "All conditions aligned"
+    reason = "All conditions aligned + follow-through confirmed"
+
+elif cond_conf and cond_vol and cond_lead and not cond_follow:
+    action = "⏳ NO TRADE"
+    reason = "Strong signal yesterday but no follow-through today"
+
 else:
     action = "⏳ NO TRADE"
 
@@ -171,6 +187,15 @@ st.write(f"Futures Lead: {lead}")
 st.write(f"Divergence: {round(divergence, 5)}")
 
 # ==============================
+# FOLLOW-THROUGH DISPLAY
+# ==============================
+
+st.subheader("Follow-Through Check")
+
+st.write(f"Today move: {round(today_move * 100, 2)}%")
+st.write(f"Follow-through confirmed: {'✅' if cond_follow else '❌'}")
+
+# ==============================
 # CONDITION CHECK
 # ==============================
 
@@ -181,15 +206,14 @@ st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
 st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
 
 # ==============================
-# DEBUG PANEL (IMPORTANT)
+# DEBUG PANEL
 # ==============================
 
-with st.expander("🔍 Debug (Check system integrity)"):
-    st.write("Raw Score:", score)
+with st.expander("🔍 Debug"):
+    st.write("Score:", score)
     st.write("Confidence:", confidence)
     st.write("Divergence:", divergence)
-    st.write("Lead:", lead)
-    st.write("Trend:", trend)
+    st.write("Today move:", today_move)
 
 # ==============================
 # FOOTER
