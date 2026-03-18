@@ -114,7 +114,7 @@ trend = get_trend(y)
 score, lead = calculate_score(y, d, trend)
 vol = volatility_state(y)
 
-confidence = int(abs(score - 50) * 2)
+confidence = int(min(abs(score - 50) * 2, 100))
 
 cond_conf = confidence > 70
 cond_vol = vol != "LOW"
