@@ -1,25 +1,30 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import yfinance as yf
 
 st.set_page_config(layout="wide")
 
 st.title("🛢️ Oil Strategy (Clean Long-Only System)")
 
 # ==============================
-# LOAD DATA (YAHOO MATCH BACKTEST)
+# LOAD DATA (FIXED)
 # ==============================
 
 @st.cache_data
 def load_data():
-    import yfinance as yf
-
     tickers = ["USO", "XLE", "BWET"]
 
-    df = yf.download(tickers, period="1y")["Close"]
-    df = df.dropna()
+    df = yf.download(tickers, period="2y")["Close"]
 
-    # REMOVE LOOKAHEAD (MATCH BACKTEST)
+    # 🔥 CRITICAL FIX: don't drop everything blindly
+    df = df.dropna(subset=["USO", "XLE"])  # allow BWET gaps
+
+    # Fill BWET if missing
+    if "BWET" in df.columns:
+        df["BWET"] = df["BWET"].fillna(method="ffill")
+
+    # SHIFT
     df["USO_prev"] = df["USO"].shift(1)
     df["XLE_prev"] = df["XLE"].shift(1)
     df["BWET_prev"] = df["BWET"].shift(1)
@@ -30,8 +35,12 @@ def load_data():
 
 data = load_data()
 
+if data is None or len(data) < 10:
+    st.error("❌ Data issue — check tickers")
+    st.stop()
+
 # ==============================
-# SCORE FUNCTION (UNCHANGED)
+# SCORE FUNCTION
 # ==============================
 
 def calculate_score(row, prev_row):
@@ -103,6 +112,10 @@ for i in range(2, len(data)):
 
 signals_df = pd.DataFrame(signals)
 
+if signals_df.empty:
+    st.error("❌ No signals generated")
+    st.stop()
+
 # ==============================
 # CURRENT SIGNAL
 # ==============================
@@ -118,27 +131,25 @@ col2.metric("Score", int(latest["score"]))
 col3.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# INTERPRETATION
+# UI
 # ==============================
 
 if latest["action"] == "BUY":
-    st.success("🚀 Strong bullish setup — enter trade")
-
+    st.success("🚀 Enter trade")
 elif latest["action"] == "EXIT":
-    st.warning("⚠️ Weakness detected — exit position")
-
+    st.warning("⚠️ Exit position")
 else:
-    st.info("⏳ Hold — no new action")
+    st.info("⏳ Hold")
 
 # ==============================
-# SIGNAL HISTORY
+# HISTORY
 # ==============================
 
 st.subheader("📅 Signal History")
 st.dataframe(signals_df.tail(20))
 
 # ==============================
-# DATA CHECK
+# DATA STATUS
 # ==============================
 
 st.subheader("📊 Data Status")
@@ -150,14 +161,3 @@ if (datetime.now() - latest_date).days > 3:
     st.warning("⚠️ Data may be outdated")
 else:
     st.success("✅ Data is recent")
-
-# ==============================
-# DEBUG (IMPORTANT)
-# ==============================
-
-with st.expander("🔍 Debug"):
-    st.write("Latest row:")
-    st.write(data.tail(1))
-
-    st.write("Previous row:")
-    st.write(data.iloc[-2])
