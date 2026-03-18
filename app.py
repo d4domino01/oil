@@ -1,95 +1,61 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (LONG ONLY)")
+st.title("🛢️ Oil Strategy (Clean Long-Only System)")
 
 # ==============================
-# LOAD DATA
+# LOAD DATA (YAHOO MATCH BACKTEST)
 # ==============================
 
 @st.cache_data
 def load_data():
-    uso = pd.read_csv(
-        "https://stooq.com/q/d/l/?s=uso.us&i=d",
-        parse_dates=["Date"]
-    ).set_index("Date")["Close"]
+    import yfinance as yf
 
-    xle = pd.read_csv(
-        "https://stooq.com/q/d/l/?s=xle.us&i=d",
-        parse_dates=["Date"]
-    ).set_index("Date")["Close"]
+    tickers = ["USO", "XLE", "BWET"]
 
-    bno = pd.read_csv(
-        "https://stooq.com/q/d/l/?s=bno.us&i=d",
-        parse_dates=["Date"]
-    ).set_index("Date")["Close"]
+    df = yf.download(tickers, period="1y")["Close"]
+    df = df.dropna()
 
-    df = pd.concat([uso, xle, bno], axis=1)
-    df.columns = ["USO", "XLE", "BNO"]
+    # REMOVE LOOKAHEAD (MATCH BACKTEST)
+    df["USO_prev"] = df["USO"].shift(1)
+    df["XLE_prev"] = df["XLE"].shift(1)
+    df["BWET_prev"] = df["BWET"].shift(1)
 
-    df = df.sort_index().dropna()
-
-    # LOCK DATA
-    df = df.iloc[:-1]
+    df = df.dropna()
 
     return df
 
 data = load_data()
 
 # ==============================
-# INDICATORS
+# SCORE FUNCTION (UNCHANGED)
 # ==============================
 
-data["MA20"] = data["USO"].rolling(20).mean()
-data["MA50"] = data["USO"].rolling(50).mean()
-data["RET"] = data["USO"].pct_change()
-data["VOL"] = data["RET"].rolling(10).std()
-
-data = data.dropna()
-
-# ==============================
-# FUNCTIONS
-# ==============================
-
-def get_trend(row):
-    return 1 if row["MA20"] > row["MA50"] else -1
-
-def volatility_state(row):
-    if row["VOL"] > 0.028:
-        return "HIGH"
-    elif row["VOL"] > 0.015:
-        return "NORMAL"
-    return "LOW"
-
-def futures_lead(a, b):
-    uso_move = (a["USO"] - b["USO"]) / b["USO"]
-    bno_move = (a["BNO"] - b["BNO"]) / b["BNO"]
-    divergence = bno_move - uso_move
-
-    if divergence > 0.012:
-        return "BULLISH"
-    elif divergence < -0.012:
-        return "BEARISH"
-    return "NEUTRAL"
-
-def calculate_score(a, b, trend, lead):
+def calculate_score(row, prev_row):
     score = 50
-    score += 20 if a["USO"] > b["USO"] else -20
-    score += 15 if a["XLE"] > b["XLE"] else -15
 
-    if lead == "BULLISH":
-        score += 10
-    elif lead == "BEARISH":
-        score -= 10
+    if row["USO"] > prev_row["USO"]:
+        score += 15
+    else:
+        score -= 15
 
-    if trend == 1:
+    if row["XLE"] > prev_row["XLE"]:
         score += 10
     else:
         score -= 10
+
+    bwet_change = (row["BWET"] - prev_row["BWET"]) / prev_row["BWET"]
+    if bwet_change > 0.03:
+        score += 5
+    elif bwet_change < -0.03:
+        score -= 5
+
+    uso_change = abs((row["USO"] - prev_row["USO"]) / prev_row["USO"])
+    if uso_change > 0.03:
+        score += 5
 
     return score
 
@@ -97,33 +63,42 @@ def calculate_score(a, b, trend, lead):
 # SIGNAL ENGINE
 # ==============================
 
+entry_threshold = 75
+exit_threshold = 55
+
 signals = []
 
-for i in range(50, len(data)):
+for i in range(2, len(data)):
     y = data.iloc[i-1]
     d = data.iloc[i-2]
 
-    trend = get_trend(y)
-    lead = futures_lead(y, d)
-    vol = volatility_state(y)
+    score = calculate_score(
+        pd.Series({
+            "USO": y["USO_prev"],
+            "XLE": y["XLE_prev"],
+            "BWET": y["BWET_prev"]
+        }),
+        pd.Series({
+            "USO": d["USO_prev"],
+            "XLE": d["XLE_prev"],
+            "BWET": d["BWET_prev"]
+        })
+    )
 
-    score = calculate_score(y, d, trend, lead)
-    confidence = int(min(abs(score - 50) * 2, 100))
+    confidence = abs(score - 50) * 2
 
-    cond_conf = confidence > 70
-    cond_vol = vol != "LOW"
-    cond_lead = lead != "NEUTRAL"
-
-    if cond_conf and cond_vol and cond_lead and trend == 1:
+    if score >= entry_threshold:
         action = "BUY"
+    elif score < exit_threshold:
+        action = "EXIT"
     else:
-        action = "NO TRADE"
+        action = "HOLD"
 
     signals.append({
         "date": data.index[i],
-        "action": action,
         "score": score,
-        "confidence": confidence
+        "confidence": int(min(confidence, 100)),
+        "action": action
     })
 
 signals_df = pd.DataFrame(signals)
@@ -135,82 +110,25 @@ signals_df = pd.DataFrame(signals)
 latest = signals_df.iloc[-1]
 
 st.markdown("## 🛢️ TODAY’S SIGNAL")
-st.metric("Action", latest["action"])
-st.metric("Confidence", f"{latest['confidence']}%")
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Action", latest["action"])
+col2.metric("Score", int(latest["score"]))
+col3.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# TRADE SIMULATION (LONG ONLY)
+# INTERPRETATION
 # ==============================
 
-capital = 10000
-position = 0
-entry_price = 0
+if latest["action"] == "BUY":
+    st.success("🚀 Strong bullish setup — enter trade")
 
-trade_log = []
-equity = []
+elif latest["action"] == "EXIT":
+    st.warning("⚠️ Weakness detected — exit position")
 
-for i in range(1, len(signals_df)):
-    row = signals_df.iloc[i]
-    price = data.iloc[i]["USO"]
-
-    if position == 0:
-        if row["action"] == "BUY":
-            position = 1
-            entry_price = price
-            trade_log.append({
-                "Date": row["date"],
-                "Type": "BUY",
-                "Entry": price
-            })
-
-    elif position == 1:
-        if row["action"] == "NO TRADE":
-            exit_price = price
-            pnl = (exit_price - entry_price) / entry_price
-
-            capital *= (1 + pnl)
-
-            trade_log[-1]["Exit"] = exit_price
-            trade_log[-1]["PnL %"] = round(pnl * 100, 2)
-
-            position = 0
-
-    equity.append(capital)
-
-# ==============================
-# PERFORMANCE
-# ==============================
-
-st.subheader("📊 Performance")
-
-if trade_log:
-    trades_df = pd.DataFrame(trade_log)
-
-    wins = len(trades_df[trades_df["PnL %"] > 0])
-    total = len(trades_df)
-
-    win_rate = (wins / total) * 100 if total > 0 else 0
-    total_return = (capital / 10000 - 1) * 100
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Total Return", f"{round(total_return,2)}%")
-    col2.metric("Trades", total)
-    col3.metric("Win Rate", f"{round(win_rate,2)}%")
-
-    st.subheader("📅 Trade Log")
-    st.dataframe(trades_df.tail(10))
-
-# ==============================
-# EQUITY CURVE
-# ==============================
-
-st.subheader("📈 Equity Curve")
-
-fig, ax = plt.subplots()
-ax.plot(equity)
-ax.set_title("Equity Curve")
-st.pyplot(fig)
+else:
+    st.info("⏳ Hold — no new action")
 
 # ==============================
 # SIGNAL HISTORY
@@ -220,7 +138,26 @@ st.subheader("📅 Signal History")
 st.dataframe(signals_df.tail(20))
 
 # ==============================
-# FOOTER
+# DATA CHECK
 # ==============================
 
-st.caption(f"Updated: {datetime.now()}")
+st.subheader("📊 Data Status")
+
+latest_date = data.index[-1]
+st.write(f"Latest data: {latest_date}")
+
+if (datetime.now() - latest_date).days > 3:
+    st.warning("⚠️ Data may be outdated")
+else:
+    st.success("✅ Data is recent")
+
+# ==============================
+# DEBUG (IMPORTANT)
+# ==============================
+
+with st.expander("🔍 Debug"):
+    st.write("Latest row:")
+    st.write(data.tail(1))
+
+    st.write("Previous row:")
+    st.write(data.iloc[-2])
