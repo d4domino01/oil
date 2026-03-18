@@ -4,10 +4,10 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (FINAL CORE EDGE)")
+st.title("🛢️ Oil Trading System (TRUE CORE EDGE)")
 
 # ==============================
-# DATA (STOOQ - STABLE)
+# DATA (STOOQ)
 # ==============================
 
 @st.cache_data
@@ -44,24 +44,17 @@ data["MA50"] = data["USO"].rolling(50).mean()
 data["RET"] = data["USO"].pct_change()
 data["VOL"] = data["RET"].rolling(10).std()
 
-data["HIGH_10"] = data["USO"].rolling(10).max()
-data["LOW_10"] = data["USO"].rolling(10).min()
-
 # ==============================
-# FUNCTIONS
+# FUNCTIONS (IDENTICAL TO BACKTEST)
 # ==============================
 
 def get_trend(row):
-    if row["MA20"] > row["MA50"]:
-        return 1
-    elif row["MA20"] < row["MA50"]:
-        return -1
-    return 0
+    return 1 if row["MA20"] > row["MA50"] else -1
 
 def volatility_state(row):
-    if row["VOL"] > 0.025:
+    if row["VOL"] > 0.028:
         return "HIGH"
-    elif row["VOL"] > 0.012:
+    elif row["VOL"] > 0.015:
         return "NORMAL"
     return "LOW"
 
@@ -71,37 +64,31 @@ def futures_lead(a, b):
 
     divergence = bno_move - uso_move
 
-    if divergence > 0.006:
+    if divergence > 0.01:
         return "BULLISH"
-    elif divergence < -0.006:
+    elif divergence < -0.01:
         return "BEARISH"
     return "NEUTRAL"
-
-def breakout_signal(row):
-    if row["USO"] >= row["HIGH_10"]:
-        return "BULLISH"
-    elif row["USO"] <= row["LOW_10"]:
-        return "BEARISH"
-    return "NONE"
 
 def calculate_score(a, b, trend):
     score = 50
 
-    score += 15 if a["USO"] > b["USO"] else -15
-    score += 10 if a["XLE"] > b["XLE"] else -10
+    score += 20 if a["USO"] > b["USO"] else -20
+    score += 15 if a["XLE"] > b["XLE"] else -15
 
     lead = futures_lead(a, b)
+
     if lead == "BULLISH":
         score += 10
     elif lead == "BEARISH":
         score -= 10
 
     if trend == 1:
-        score += 8
-    elif trend == -1:
-        score -= 8
+        score += 10
+    else:
+        score -= 10
 
-    return score
+    return score, lead
 
 # ==============================
 # SIGNAL BUILD
@@ -109,26 +96,28 @@ def calculate_score(a, b, trend):
 
 signals = []
 
-for i in range(20, len(data)):
+for i in range(50, len(data)):
     y = data.iloc[i-1]
     d = data.iloc[i-2]
 
     trend = get_trend(y)
-    score = calculate_score(y, d, trend)
+    score, lead = calculate_score(y, d, trend)
     vol = volatility_state(y)
-    lead = futures_lead(y, d)
-    breakout = breakout_signal(y)
 
     signals.append({
         "date": data.index[i],
         "score": score,
         "trend": trend,
         "vol": vol,
-        "lead": lead,
-        "breakout": breakout
+        "lead": lead
     })
 
 df = pd.DataFrame(signals)
+
+if df.empty:
+    st.error("No signals generated")
+    st.stop()
+
 latest = df.iloc[-1]
 
 confidence = int(abs(latest["score"] - 50) * 2)
@@ -138,23 +127,14 @@ confidence = int(abs(latest["score"] - 50) * 2)
 # ==============================
 
 if (
-    confidence > 60 and
-    latest["vol"] != "LOW"
+    confidence > 70 and
+    latest["vol"] != "LOW" and
+    latest["lead"] != "NEUTRAL"
 ):
     if latest["trend"] == 1:
         action = "🚀 TREND BUY"
     else:
         action = "🔻 TREND SELL"
-
-elif (
-    latest["breakout"] != "NONE" and
-    latest["vol"] == "HIGH"
-):
-    if latest["breakout"] == "BULLISH":
-        action = "⚡ BREAKOUT BUY"
-    else:
-        action = "⚡ BREAKOUT SELL"
-
 else:
     action = "⏳ NO TRADE"
 
@@ -172,26 +152,23 @@ col4.metric("Volatility", latest["vol"])
 st.markdown(f"## 🔥 ACTION: {action}")
 
 # ==============================
-# BREAKDOWN
+# SIGNAL DETAILS
 # ==============================
 
 st.subheader("Signal Breakdown")
 
 st.write(f"Futures Lead: {latest['lead']}")
-st.write(f"Breakout: {latest['breakout']}")
+st.write(f"Volatility: {latest['vol']}")
 
 # ==============================
 # INTERPRETATION
 # ==============================
 
 if "TREND" in action:
-    st.success("High-quality trend trade")
-
-elif "BREAKOUT" in action:
-    st.warning("Fast breakout — manage tightly")
+    st.success("High-confidence setup → Full position")
 
 else:
-    st.info("No edge — stay out")
+    st.info("No edge → Stay out")
 
 # ==============================
 # HISTORY
