@@ -198,3 +198,63 @@ with st.expander("🔍 Debug"):
 # ==============================
 
 st.caption(f"Updated: {datetime.now()}")
+
+# ==============================
+# SIGNAL CONSISTENCY CHECK (SAFE)
+# ==============================
+
+st.subheader("📊 Signal Consistency Check")
+
+# --- LIVE SIGNAL (already calculated above) ---
+live_action = action
+
+# --- BACKTEST STYLE CALCULATION ---
+# simulate how backtest would calculate signal for SAME date
+
+y_bt = data.iloc[-1]
+d_bt = data.iloc[-2]
+
+trend_bt = get_trend(y_bt)
+lead_bt, _ = futures_lead(y_bt, d_bt)
+vol_bt = volatility_state(y_bt)
+
+score_bt = calculate_score(y_bt, d_bt, trend_bt, lead_bt)
+confidence_bt = int(min(abs(score_bt - 50) * 2, 100))
+
+cond_conf_bt = confidence_bt > 70
+cond_vol_bt = vol_bt != "LOW"
+cond_lead_bt = lead_bt != "NEUTRAL"
+
+if cond_conf_bt and cond_vol_bt and cond_lead_bt:
+    backtest_action = "🚀 TREND BUY" if trend_bt == 1 else "🔻 TREND SELL"
+else:
+    backtest_action = "⏳ NO TRADE"
+
+# ==============================
+# COMPARE
+# ==============================
+
+col1, col2 = st.columns(2)
+
+col1.metric("Live Signal", live_action)
+col2.metric("Backtest Signal", backtest_action)
+
+# RESULT
+if live_action == backtest_action:
+    st.success("✅ MATCH — System is consistent")
+else:
+    st.error("⚠️ MISMATCH — Investigate (data or logic drift)")
+
+# ==============================
+# EXTRA DEBUG (OPTIONAL)
+# ==============================
+
+with st.expander("🔍 Signal Comparison Debug"):
+    st.write("Live Score:", score)
+    st.write("Backtest Score:", score_bt)
+
+    st.write("Live Confidence:", confidence)
+    st.write("Backtest Confidence:", confidence_bt)
+
+    st.write("Live Lead:", lead)
+    st.write("Backtest Lead:", lead_bt)
