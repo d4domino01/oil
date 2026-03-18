@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (CORE + DAILY DECISION)")
+st.title("🛢️ Oil Trading System (CORE + EXPLAINABLE ENGINE)")
 
 # ==============================
 # LOAD DATA
@@ -107,7 +107,7 @@ def calculate_score(a, b, trend):
     return score, lead
 
 # ==============================
-# DAILY DECISION (MAIN FEATURE)
+# DAILY DECISION
 # ==============================
 
 y = data.iloc[-1]
@@ -119,20 +119,43 @@ vol = volatility_state(y)
 
 confidence = int(abs(score - 50) * 2)
 
-if (
-    confidence > 70 and
-    vol != "LOW" and
-    lead != "NEUTRAL"
-):
+# ==============================
+# CONDITION CHECKS
+# ==============================
+
+cond_conf = confidence > 70
+cond_vol = vol != "LOW"
+cond_lead = lead != "NEUTRAL"
+
+# ==============================
+# DECISION
+# ==============================
+
+if cond_conf and cond_vol and cond_lead:
     if trend == 1:
         action = "🚀 TREND BUY"
     else:
         action = "🔻 TREND SELL"
+    reason = "All conditions aligned"
 else:
     action = "⏳ NO TRADE"
 
+    # Explain WHY
+    failed = []
+
+    if not cond_conf:
+        failed.append("Confidence too low")
+
+    if not cond_vol:
+        failed.append("Volatility too low")
+
+    if not cond_lead:
+        failed.append("Missing futures confirmation")
+
+    reason = " | ".join(failed)
+
 # ==============================
-# DISPLAY MAIN DECISION
+# DISPLAY
 # ==============================
 
 st.markdown("## 🛢️ TODAY’S TRADE DECISION")
@@ -143,8 +166,10 @@ col1.metric("Action", action)
 col2.metric("Confidence", f"{confidence}%")
 col3.metric("Trend", "UP" if trend == 1 else "DOWN")
 
+st.markdown(f"### 🧠 Reason: {reason}")
+
 # ==============================
-# BREAKDOWN
+# SIGNAL BREAKDOWN
 # ==============================
 
 st.subheader("Signal Breakdown")
@@ -154,13 +179,14 @@ st.write(f"Volatility: {vol}")
 st.write(f"Futures Lead: {lead}")
 
 # ==============================
-# INTERPRETATION
+# VISUAL CONDITION CHECK
 # ==============================
 
-if "BUY" in action or "SELL" in action:
-    st.success("High-confidence setup → Trade allowed")
-else:
-    st.info("No edge → Stay out")
+st.subheader("Condition Check")
+
+st.write(f"Confidence > 70: {'✅' if cond_conf else '❌'}")
+st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
+st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
 
 # ==============================
 # HISTORY
