@@ -45,6 +45,34 @@ data["RET"] = data["USO"].pct_change()
 data["VOL"] = data["RET"].rolling(10).std()
 
 # ==============================
+# DATA HEALTH CHECK
+# ==============================
+
+st.subheader("📊 Data Status")
+
+if data is None or data.empty:
+    st.error("❌ No data loaded")
+    st.stop()
+
+latest_date = data.index[-1]
+
+st.write(f"Latest data date: {latest_date}")
+
+# Check if data is fresh (within last 3 days)
+from datetime import datetime
+
+days_old = (datetime.now() - latest_date).days
+
+if days_old > 3:
+    st.warning(f"⚠️ Data is {days_old} days old (may be outdated)")
+else:
+    st.success("✅ Data is recent")
+
+st.write("Last 5 rows:")
+st.dataframe(data.tail())
+
+
+# ==============================
 # FUNCTIONS (IDENTICAL TO BACKTEST)
 # ==============================
 
