@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (CORE + EXPLAINABLE ENGINE)")
+st.title("🛢️ Oil Trading System (PRO EDGE)")
 
 # ==============================
 # LOAD DATA
@@ -35,14 +35,13 @@ def load_data():
 data = load_data()
 
 # ==============================
-# DATA CHECK
+# DATA STATUS
 # ==============================
-
-st.subheader("📊 Data Status")
 
 latest_date = data.index[-1]
 days_old = (datetime.now() - latest_date).days
 
+st.subheader("📊 Data Status")
 st.write(f"Latest data date: {latest_date}")
 
 if days_old > 3:
@@ -77,7 +76,6 @@ def volatility_state(row):
 def futures_lead(a, b):
     uso_move = (a["USO"] - b["USO"]) / b["USO"]
     bno_move = (a["BNO"] - b["BNO"]) / b["BNO"]
-
     divergence = bno_move - uso_move
 
     if divergence > 0.01:
@@ -88,7 +86,6 @@ def futures_lead(a, b):
 
 def calculate_score(a, b, trend):
     score = 50
-
     score += 20 if a["USO"] > b["USO"] else -20
     score += 15 if a["XLE"] > b["XLE"] else -15
 
@@ -107,7 +104,7 @@ def calculate_score(a, b, trend):
     return score, lead
 
 # ==============================
-# DAILY DECISION
+# DAILY SIGNAL
 # ==============================
 
 y = data.iloc[-1]
@@ -119,43 +116,45 @@ vol = volatility_state(y)
 
 confidence = int(abs(score - 50) * 2)
 
-# ==============================
-# CONDITION CHECKS
-# ==============================
-
+# CONDITIONS
 cond_conf = confidence > 70
 cond_vol = vol != "LOW"
 cond_lead = lead != "NEUTRAL"
 
+conditions_passed = sum([cond_conf, cond_vol, cond_lead])
+
 # ==============================
-# DECISION
+# DECISION ENGINE
 # ==============================
 
-if cond_conf and cond_vol and cond_lead:
+if conditions_passed == 3:
+    action = "🚀 TRADE"
     if trend == 1:
-        action = "🚀 TREND BUY"
+        action_detail = "TREND BUY"
     else:
-        action = "🔻 TREND SELL"
+        action_detail = "TREND SELL"
     reason = "All conditions aligned"
+
+elif conditions_passed == 2:
+    action = "🟡 ALMOST TRADE"
+    action_detail = "WAIT / WATCH"
+    failed = []
+    if not cond_conf: failed.append("Confidence")
+    if not cond_vol: failed.append("Volatility")
+    if not cond_lead: failed.append("Futures")
+    reason = f"Missing: {', '.join(failed)}"
+
 else:
     action = "⏳ NO TRADE"
-
-    # Explain WHY
+    action_detail = "STAY OUT"
     failed = []
-
-    if not cond_conf:
-        failed.append("Confidence too low")
-
-    if not cond_vol:
-        failed.append("Volatility too low")
-
-    if not cond_lead:
-        failed.append("Missing futures confirmation")
-
-    reason = " | ".join(failed)
+    if not cond_conf: failed.append("Confidence")
+    if not cond_vol: failed.append("Volatility")
+    if not cond_lead: failed.append("Futures")
+    reason = f"Weak setup: {', '.join(failed)}"
 
 # ==============================
-# DISPLAY
+# DISPLAY MAIN
 # ==============================
 
 st.markdown("## 🛢️ TODAY’S TRADE DECISION")
@@ -166,20 +165,17 @@ col1.metric("Action", action)
 col2.metric("Confidence", f"{confidence}%")
 col3.metric("Trend", "UP" if trend == 1 else "DOWN")
 
+st.markdown(f"### 👉 {action_detail}")
 st.markdown(f"### 🧠 Reason: {reason}")
 
-# ==============================
-# SIGNAL BREAKDOWN
-# ==============================
-
-st.subheader("Signal Breakdown")
-
-st.write(f"Score: {score}")
-st.write(f"Volatility: {vol}")
-st.write(f"Futures Lead: {lead}")
+# 🔔 ALERT
+if conditions_passed == 3:
+    st.success("🔔 TRADE SIGNAL ACTIVE — TAKE TRADE")
+elif conditions_passed == 2:
+    st.warning("🟡 CLOSE — monitor closely")
 
 # ==============================
-# VISUAL CONDITION CHECK
+# CONDITION CHECK
 # ==============================
 
 st.subheader("Condition Check")
@@ -189,10 +185,15 @@ st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
 st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
 
 # ==============================
-# HISTORY
+# HISTORY + STATS
 # ==============================
 
-signals = []
+stats = {
+    "confidence_fail": 0,
+    "vol_fail": 0,
+    "lead_fail": 0,
+    "total": 0
+}
 
 for i in range(50, len(data)):
     y = data.iloc[i-1]
@@ -201,21 +202,26 @@ for i in range(50, len(data)):
     trend = get_trend(y)
     score, lead = calculate_score(y, d, trend)
     vol = volatility_state(y)
-
     confidence = abs(score - 50) * 2
 
-    signals.append({
-        "date": data.index[i],
-        "score": score,
-        "confidence": confidence,
-        "trend": trend,
-        "vol": vol,
-        "lead": lead
-    })
+    c = confidence > 70
+    v = vol != "LOW"
+    l = lead != "NEUTRAL"
 
-df = pd.DataFrame(signals)
+    stats["total"] += 1
 
-st.subheader("Recent Signals")
-st.dataframe(df.tail(10))
+    if not c: stats["confidence_fail"] += 1
+    if not v: stats["vol_fail"] += 1
+    if not l: stats["lead_fail"] += 1
+
+st.subheader("📊 Filter Blocking Stats")
+
+st.write(f"Confidence blocked: {stats['confidence_fail']} times")
+st.write(f"Volatility blocked: {stats['vol_fail']} times")
+st.write(f"Futures blocked: {stats['lead_fail']} times")
+
+# ==============================
+# FOOTER
+# ==============================
 
 st.caption(f"Updated: {datetime.now()}")
