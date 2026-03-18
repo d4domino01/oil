@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-st.write("VERSION 8 (VOL + FUTURES EDGE)")
+st.write("VERSION 9 (REAL EDGE UPGRADE)")
 
 ENTRY_THRESHOLD = 75
 
@@ -28,10 +28,15 @@ def load_data():
             parse_dates=["Date"]
         ).set_index("Date")["Close"]
 
-        df = pd.concat([uso, xle, bno], axis=1)
-        df.columns = ["USO", "XLE", "BNO"]
+        dxy = pd.read_csv(
+            "https://stooq.com/q/d/l/?s=dx-y.ny&i=d",
+            parse_dates=["Date"]
+        ).set_index("Date")["Close"]
 
-        return df.sort_index().dropna().tail(120)
+        df = pd.concat([uso, xle, bno, dxy], axis=1)
+        df.columns = ["USO", "XLE", "BNO", "DXY"]
+
+        return df.sort_index().dropna().tail(150)
 
     except:
         return None
@@ -39,7 +44,7 @@ def load_data():
 
 data = load_data()
 
-if data is None or len(data) < 50:
+if data is None or len(data) < 60:
     st.error("❌ Data issue")
     st.stop()
 
@@ -58,14 +63,14 @@ def get_trend(row):
     return 0
 
 # ==============================
-# VOLATILITY FILTER (OVX STYLE)
+# VOLATILITY (IMPROVED)
 # ==============================
 
-data["USO_RET"] = data["USO"].pct_change()
-data["VOL"] = data["USO_RET"].rolling(10).std()
+data["RET"] = data["USO"].pct_change()
+data["VOL"] = data["RET"].rolling(10).std()
 
 def volatility_state(row):
-    if row["VOL"] > 0.025:
+    if row["VOL"] > 0.028:
         return "HIGH"
     elif row["VOL"] > 0.015:
         return "NORMAL"
@@ -73,39 +78,91 @@ def volatility_state(row):
         return "LOW"
 
 # ==============================
-# FUTURES LEAD (BNO MOMENTUM)
+# BREAKOUT STRUCTURE
+# ==============================
+
+data["HIGH_10"] = data["USO"].rolling(10).max()
+data["LOW_10"] = data["USO"].rolling(10).min()
+
+def breakout_signal(row):
+    if row["USO"] >= row["HIGH_10"]:
+        return "BULLISH"
+    elif row["USO"] <= row["LOW_10"]:
+        return "BEARISH"
+    return "NONE"
+
+# ==============================
+# FUTURES PROXY (BNO vs USO)
 # ==============================
 
 def futures_lead(a, b):
-    move = (a["BNO"] - b["BNO"]) / b["BNO"]
+    uso_move = (a["USO"] - b["USO"]) / b["USO"]
+    bno_move = (a["BNO"] - b["BNO"]) / b["BNO"]
 
-    if move > 0.01:
+    divergence = bno_move - uso_move
+
+    if divergence > 0.01:
         return "BULLISH"
-    elif move < -0.01:
+    elif divergence < -0.01:
         return "BEARISH"
-    else:
-        return "NEUTRAL"
+    return "NEUTRAL"
 
 # ==============================
-# SCORE
+# DXY PRESSURE
+# ==============================
+
+def dxy_pressure(a, b):
+    move = (a["DXY"] - b["DXY"]) / b["DXY"]
+
+    if move > 0.002:
+        return "BEARISH"
+    elif move < -0.002:
+        return "BULLISH"
+    return "NEUTRAL"
+
+# ==============================
+# SCORE ENGINE (UPGRADED)
 # ==============================
 
 def calc_score(a, b, trend):
     score = 50
 
-    score += 20 if a["USO"] > b["USO"] else -20
-    score += 15 if a["XLE"] > b["XLE"] else -15
+    # Price momentum
+    if a["USO"] > b["USO"]:
+        score += 18
+    else:
+        score -= 18
 
-    bno_change = (a["BNO"] - b["BNO"]) / b["BNO"]
-    if bno_change > 0.015:
+    # Energy confirmation
+    if a["XLE"] > b["XLE"]:
+        score += 12
+    else:
+        score -= 12
+
+    # Futures lead
+    lead = futures_lead(a, b)
+    if lead == "BULLISH":
+        score += 12
+    elif lead == "BEARISH":
+        score -= 12
+
+    # DXY pressure
+    dxy = dxy_pressure(a, b)
+    if dxy == "BULLISH":
         score += 10
-    elif bno_change < -0.015:
+    elif dxy == "BEARISH":
         score -= 10
 
+    # Trend bias
     if trend == 1:
-        score += 10
+        score += 8
     elif trend == -1:
-        score -= 10
+        score -= 8
+
+    # Conflict penalty (IMPORTANT)
+    if lead != "NEUTRAL" and dxy != "NEUTRAL":
+        if lead != dxy:
+            score -= 10  # conflicting macro vs flow
 
     return score
 
@@ -115,7 +172,7 @@ def calc_score(a, b, trend):
 
 signals = []
 
-for i in range(50, len(data)):
+for i in range(60, len(data)):
     try:
         y = data.iloc[i-1]
         d = data.iloc[i-2]
@@ -124,13 +181,17 @@ for i in range(50, len(data)):
         score = calc_score(y, d, trend)
         vol = volatility_state(y)
         lead = futures_lead(y, d)
+        breakout = breakout_signal(y)
+        dxy = dxy_pressure(y, d)
 
         signals.append({
             "date": data.index[i],
             "score": score,
             "trend": trend,
             "vol": vol,
-            "lead": lead
+            "lead": lead,
+            "breakout": breakout,
+            "dxy": dxy
         })
 
     except:
@@ -153,7 +214,8 @@ confidence = int(abs(latest["score"] - 50) * 2)
 if (
     confidence > 70 and
     latest["vol"] != "LOW" and
-    latest["lead"] != "NEUTRAL"
+    latest["lead"] != "NEUTRAL" and
+    latest["dxy"] != "NEUTRAL"
 ):
     if latest["trend"] == 1:
         action = "🚀 TREND BUY"
@@ -162,15 +224,15 @@ if (
     else:
         action = "⏳ NO TRADE"
 
-# ⚡ BREAKOUT TRADE
+# ⚡ BREAKOUT TRADE (STRUCTURE BASED)
 elif (
-    latest["vol"] == "HIGH" and
-    latest["lead"] != "NEUTRAL"
+    latest["breakout"] != "NONE" and
+    latest["vol"] == "HIGH"
 ):
-    if latest["lead"] == "BULLISH":
-        action = "⚡ BREAKOUT BUY (FAST MOVE)"
+    if latest["breakout"] == "BULLISH":
+        action = "⚡ BREAKOUT BUY"
     else:
-        action = "⚡ BREAKOUT SELL (FAST MOVE)"
+        action = "⚡ BREAKOUT SELL"
 
 # ❌ NO TRADE
 else:
@@ -180,7 +242,7 @@ else:
 # UI
 # ==============================
 
-st.title("🛢️ Oil Trading System (PRO EDGE)")
+st.title("🛢️ Oil Trading System (REAL EDGE)")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -195,8 +257,11 @@ st.markdown(f"## 🔥 ACTION: {action}")
 # EXTRA SIGNALS
 # ==============================
 
-st.subheader("Futures Lead (BNO)")
-st.write(latest["lead"])
+st.subheader("Signal Breakdown")
+
+st.write(f"Futures Lead: {latest['lead']}")
+st.write(f"DXY Pressure: {latest['dxy']}")
+st.write(f"Breakout: {latest['breakout']}")
 
 # ==============================
 # INTERPRETATION
@@ -206,10 +271,10 @@ if "TREND" in action:
     st.success("HIGH QUALITY TREND TRADE")
 
 elif "BREAKOUT" in action:
-    st.warning("FAST MOVE → QUICK MANAGEMENT REQUIRED")
+    st.warning("FAST MOVE → MANAGE QUICKLY")
 
 else:
-    st.info("NO EDGE → DO NOTHING")
+    st.info("NO EDGE → STAY OUT")
 
 # ==============================
 # INFO
@@ -224,15 +289,16 @@ st.subheader("Trading Rules")
 
 st.write("""
 TREND TRADE:
-- Full size
 - Confidence > 70
-- Normal or High volatility
+- Full position
+- Macro aligned (DXY + Futures)
 
 BREAKOUT TRADE:
+- High volatility + structure break
 - Smaller size
-- High volatility required
-- Quick exits
+- Fast exits
 
 NO TRADE:
-- Stay out
+- Conflicting signals
+- Low volatility
 """)
