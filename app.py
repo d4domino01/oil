@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (FINAL CORE SYSTEM)")
+st.title("🛢️ Oil Trading System (FINAL LOCKED VERSION)")
 
 # ==============================
 # LOAD DATA
@@ -30,7 +30,12 @@ def load_data():
     df = pd.concat([uso, xle, bno], axis=1)
     df.columns = ["USO", "XLE", "BNO"]
 
-    return df.sort_index().dropna()
+    df = df.sort_index().dropna()
+
+    # 🔒 CRITICAL FIX: remove latest unstable row
+    df = df.iloc[:-1]
+
+    return df
 
 data = load_data()
 
@@ -41,13 +46,14 @@ data = load_data()
 latest_date = data.index[-1]
 days_old = (datetime.now() - latest_date).days
 
-st.subheader("📊 Data Status")
-st.write(f"Latest data date: {latest_date}")
+st.subheader("📊 Data Status (LOCKED DATA)")
+
+st.write(f"Using confirmed data up to: {latest_date}")
 
 if days_old > 3:
     st.warning(f"⚠️ Data is {days_old} days old")
 else:
-    st.success("✅ Data is recent")
+    st.success("✅ Data is stable and confirmed")
 
 # ==============================
 # INDICATORS
@@ -62,7 +68,7 @@ data["VOL"] = data["RET"].rolling(10).std()
 data = data.dropna()
 
 # ==============================
-# FUNCTIONS (LOCKED)
+# FUNCTIONS
 # ==============================
 
 def get_trend(row):
@@ -106,10 +112,10 @@ def calculate_score(a, b, trend, lead):
     return score
 
 # ==============================
-# DAILY DECISION (CORRECT)
+# SIGNAL CALCULATION
 # ==============================
 
-y = data.iloc[-1]   # yesterday
+y = data.iloc[-1]   # confirmed yesterday
 d = data.iloc[-2]   # day before
 
 trend = get_trend(y)
@@ -118,7 +124,6 @@ vol = volatility_state(y)
 
 score = calculate_score(y, d, trend, lead)
 
-# FIXED CONFIDENCE
 confidence = int(min(abs(score - 50) * 2, 100))
 
 # CONDITIONS
@@ -126,7 +131,10 @@ cond_conf = confidence > 70
 cond_vol = vol != "LOW"
 cond_lead = lead != "NEUTRAL"
 
+# ==============================
 # FINAL DECISION
+# ==============================
+
 if cond_conf and cond_vol and cond_lead:
     action = "🚀 TREND BUY" if trend == 1 else "🔻 TREND SELL"
     reason = "All conditions aligned"
@@ -176,7 +184,7 @@ st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
 st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
 
 # ==============================
-# DEBUG PANEL
+# DEBUG
 # ==============================
 
 with st.expander("🔍 Debug"):
