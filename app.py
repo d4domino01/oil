@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Trading System (PRO EDGE)")
+st.title("🛢️ Oil Trading System (PRO COMPLETE)")
 
 # ==============================
 # LOAD DATA
@@ -30,7 +31,7 @@ def load_data():
     df = pd.concat([uso, xle, bno], axis=1)
     df.columns = ["USO", "XLE", "BNO"]
 
-    return df.sort_index().dropna().tail(120)
+    return df.sort_index().dropna().tail(200)
 
 data = load_data()
 
@@ -55,7 +56,6 @@ else:
 
 data["MA20"] = data["USO"].rolling(20).mean()
 data["MA50"] = data["USO"].rolling(50).mean()
-
 data["RET"] = data["USO"].pct_change()
 data["VOL"] = data["RET"].rolling(10).std()
 
@@ -104,7 +104,7 @@ def calculate_score(a, b, trend):
     return score, lead
 
 # ==============================
-# DAILY SIGNAL
+# DAILY DECISION
 # ==============================
 
 y = data.iloc[-1]
@@ -116,7 +116,6 @@ vol = volatility_state(y)
 
 confidence = int(abs(score - 50) * 2)
 
-# CONDITIONS
 cond_conf = confidence > 70
 cond_vol = vol != "LOW"
 cond_lead = lead != "NEUTRAL"
@@ -129,10 +128,7 @@ conditions_passed = sum([cond_conf, cond_vol, cond_lead])
 
 if conditions_passed == 3:
     action = "🚀 TRADE"
-    if trend == 1:
-        action_detail = "TREND BUY"
-    else:
-        action_detail = "TREND SELL"
+    action_detail = "TREND BUY" if trend == 1 else "TREND SELL"
     reason = "All conditions aligned"
 
 elif conditions_passed == 2:
@@ -168,11 +164,31 @@ col3.metric("Trend", "UP" if trend == 1 else "DOWN")
 st.markdown(f"### 👉 {action_detail}")
 st.markdown(f"### 🧠 Reason: {reason}")
 
-# 🔔 ALERT
+# ALERTS
 if conditions_passed == 3:
     st.success("🔔 TRADE SIGNAL ACTIVE — TAKE TRADE")
 elif conditions_passed == 2:
-    st.warning("🟡 CLOSE — monitor closely")
+    st.warning("🟡 CLOSE — monitor next session")
+
+# ==============================
+# AI INSIGHT
+# ==============================
+
+st.subheader("🧠 AI Market Insight")
+
+if conditions_passed == 3:
+    st.success("Strong confirmed setup — execute trade")
+
+elif conditions_passed == 2:
+    if not cond_lead:
+        st.warning("Trend strong + volatility good → waiting for futures confirmation (likely soon)")
+    elif not cond_conf:
+        st.warning("Structure good but momentum not strong enough yet")
+    elif not cond_vol:
+        st.warning("Market quiet — breakout possible if volatility expands")
+
+else:
+    st.info("No meaningful setup forming")
 
 # ==============================
 # CONDITION CHECK
@@ -185,15 +201,80 @@ st.write(f"Volatility OK: {'✅' if cond_vol else '❌'}")
 st.write(f"Futures Confirmed: {'✅' if cond_lead else '❌'}")
 
 # ==============================
-# HISTORY + STATS
+# TRADE TRACKER
 # ==============================
 
-stats = {
-    "confidence_fail": 0,
-    "vol_fail": 0,
-    "lead_fail": 0,
-    "total": 0
-}
+st.subheader("📊 Trade Performance Tracker")
+
+capital = 10000
+position = 0
+entry_price = 0
+
+equity_curve = []
+trade_log = []
+
+for i in range(50, len(data)):
+    y = data.iloc[i-1]
+    d = data.iloc[i-2]
+    t = data.iloc[i]
+
+    trend = get_trend(y)
+    score, lead = calculate_score(y, d, trend)
+    vol = volatility_state(y)
+
+    confidence = abs(score - 50) * 2
+
+    c = confidence > 70
+    v = vol != "LOW"
+    l = lead != "NEUTRAL"
+
+    prev_position = position
+
+    if position == 0 and c and v and l:
+        position = 1 if trend == 1 else -1
+        entry_price = t["USO"]
+
+        trade_log.append({
+            "Date": data.index[i],
+            "Type": "BUY" if position == 1 else "SELL",
+            "Entry": entry_price
+        })
+
+    elif position != 0:
+        if not (c and v and l):
+            exit_price = t["USO"]
+            pnl = (exit_price - entry_price) / entry_price
+            if position == -1:
+                pnl *= -1
+
+            capital *= (1 + pnl)
+
+            trade_log[-1]["Exit"] = exit_price
+            trade_log[-1]["PnL %"] = round(pnl * 100, 2)
+
+            position = 0
+
+    equity_curve.append(capital)
+
+# DISPLAY TRADES
+if trade_log:
+    trades_df = pd.DataFrame(trade_log)
+    st.dataframe(trades_df.tail(10))
+
+    total_return = (capital / 10000 - 1) * 100
+    st.metric("Total Return", f"{round(total_return,2)}%")
+
+# EQUITY CURVE
+fig, ax = plt.subplots()
+ax.plot(equity_curve)
+ax.set_title("Equity Curve")
+st.pyplot(fig)
+
+# ==============================
+# FILTER STATS
+# ==============================
+
+stats = {"confidence": 0, "vol": 0, "lead": 0}
 
 for i in range(50, len(data)):
     y = data.iloc[i-1]
@@ -202,23 +283,18 @@ for i in range(50, len(data)):
     trend = get_trend(y)
     score, lead = calculate_score(y, d, trend)
     vol = volatility_state(y)
+
     confidence = abs(score - 50) * 2
 
-    c = confidence > 70
-    v = vol != "LOW"
-    l = lead != "NEUTRAL"
-
-    stats["total"] += 1
-
-    if not c: stats["confidence_fail"] += 1
-    if not v: stats["vol_fail"] += 1
-    if not l: stats["lead_fail"] += 1
+    if not (confidence > 70): stats["confidence"] += 1
+    if not (vol != "LOW"): stats["vol"] += 1
+    if not (lead != "NEUTRAL"): stats["lead"] += 1
 
 st.subheader("📊 Filter Blocking Stats")
 
-st.write(f"Confidence blocked: {stats['confidence_fail']} times")
-st.write(f"Volatility blocked: {stats['vol_fail']} times")
-st.write(f"Futures blocked: {stats['lead_fail']} times")
+st.write(f"Confidence blocked: {stats['confidence']}")
+st.write(f"Volatility blocked: {stats['vol']}")
+st.write(f"Futures blocked: {stats['lead']}")
 
 # ==============================
 # FOOTER
