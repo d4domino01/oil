@@ -8,39 +8,58 @@ st.set_page_config(layout="wide")
 st.title("🛢️ Oil Strategy (Clean Long-Only System)")
 
 # ==============================
-# LOAD DATA (FIXED)
+# LOAD DATA (ROBUST + FALLBACK)
 # ==============================
 
 @st.cache_data
 def load_data():
-    tickers = ["USO", "XLE", "BWET"]
+    try:
+        # Try BWET first (your original system)
+        df = yf.download(["USO", "XLE", "BWET"], period="2y")["Close"]
 
-    df = yf.download(tickers, period="2y")["Close"]
+        if df is None or df.empty or "BWET" not in df.columns:
+            raise Exception("BWET failed")
 
-    # 🔥 CRITICAL FIX: don't drop everything blindly
-    df = df.dropna(subset=["USO", "XLE"])  # allow BWET gaps
+        df = df.dropna(subset=["USO", "XLE"])
 
-    # Fill BWET if missing
-    if "BWET" in df.columns:
-        df["BWET"] = df["BWET"].fillna(method="ffill")
+        # Forward fill BWET gaps
+        df["BWET"] = df["BWET"].ffill()
 
-    # SHIFT
+        source = "BWET"
+
+    except:
+        # Fallback to BNO (stable)
+        df = yf.download(["USO", "XLE", "BNO"], period="2y")["Close"]
+        df = df.dropna()
+
+        df.rename(columns={"BNO": "BWET"}, inplace=True)
+
+        source = "BNO (fallback)"
+
+    # SHIFT (no lookahead)
     df["USO_prev"] = df["USO"].shift(1)
     df["XLE_prev"] = df["XLE"].shift(1)
     df["BWET_prev"] = df["BWET"].shift(1)
 
     df = df.dropna()
 
-    return df
+    return df, source
 
-data = load_data()
 
-if data is None or len(data) < 10:
-    st.error("❌ Data issue — check tickers")
-    st.stop()
+data, source = load_data()
 
 # ==============================
-# SCORE FUNCTION
+# FAIL SAFE
+# ==============================
+
+if data is None or len(data) < 10:
+    st.error("❌ Data still invalid")
+    st.stop()
+
+st.caption(f"Data source: {source}")
+
+# ==============================
+# SCORE FUNCTION (UNCHANGED)
 # ==============================
 
 def calculate_score(row, prev_row):
@@ -131,7 +150,7 @@ col2.metric("Score", int(latest["score"]))
 col3.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# UI
+# INTERPRETATION
 # ==============================
 
 if latest["action"] == "BUY":
