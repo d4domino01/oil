@@ -217,6 +217,114 @@ for part in score_parts:
     st.write(part)
 
 # ==============================
+# 🟡 EARLY SIGNAL + PROBABILITY
+# ==============================
+
+st.subheader("🧠 Predictive Insight (Next-Day Edge)")
+
+# Use latest available confirmed + current forming structure
+y = data.iloc[-2]
+d = data.iloc[-3]
+
+y_prev = pd.Series({
+    "USO": y["USO_prev"],
+    "XLE": y["XLE_prev"],
+    "BWET": y["BWET_prev"]
+})
+
+d_prev = pd.Series({
+    "USO": d["USO_prev"],
+    "XLE": d["XLE_prev"],
+    "BWET": d["BWET_prev"]
+})
+
+# ==============================
+# EARLY BUILDING BLOCKS
+# ==============================
+
+early_score = 0
+signals = []
+
+# USO direction (strongest weight)
+if y_prev["USO"] > d_prev["USO"]:
+    early_score += 30
+    signals.append("USO building upward pressure")
+else:
+    early_score -= 30
+    signals.append("USO showing weakness")
+
+# XLE confirmation
+if y_prev["XLE"] > d_prev["XLE"]:
+    early_score += 20
+    signals.append("Energy sector confirming")
+else:
+    early_score -= 20
+    signals.append("Energy sector not confirming")
+
+# Oil move (BNO/BWET)
+bwet_change = (y_prev["BWET"] - d_prev["BWET"]) / d_prev["BWET"]
+
+if bwet_change > 0.02:
+    early_score += 15
+    signals.append("Oil strength building")
+elif bwet_change < -0.02:
+    early_score -= 15
+    signals.append("Oil weakening")
+
+# Momentum
+uso_change = (y_prev["USO"] - d_prev["USO"]) / d_prev["USO"]
+
+if uso_change > 0.015:
+    early_score += 15
+    signals.append("Momentum increasing")
+
+# ==============================
+# NORMALIZE PROBABILITY
+# ==============================
+
+probability = max(min(50 + early_score, 100), 0)
+
+# ==============================
+# INTERPRETATION
+# ==============================
+
+st.markdown("### 📊 Tomorrow Probability")
+
+st.metric("Follow-through Probability", f"{int(probability)}%")
+
+# Visual interpretation
+if probability > 70:
+    st.success("🔥 Strong probability of continuation")
+elif probability > 55:
+    st.info("📈 Moderate bullish pressure building")
+elif probability > 45:
+    st.warning("⚖️ Unclear direction")
+else:
+    st.error("📉 Weak / likely no follow-through")
+
+# ==============================
+# EARLY SIGNAL
+# ==============================
+
+st.markdown("### 🟡 Early Signal")
+
+if probability > 65 and latest["action"] != "BUY":
+    st.warning("⚡ Early BUY forming (not confirmed yet)")
+elif probability < 35 and latest["action"] == "BUY":
+    st.error("⚠️ Weak follow-through risk")
+else:
+    st.info("No early signal")
+
+# ==============================
+# SIGNAL DETAILS
+# ==============================
+
+st.markdown("### 🔍 What’s Driving This")
+
+for s in signals:
+    st.write(f"• {s}")
+
+# ==============================
 # SIGNAL HISTORY
 # ==============================
 
