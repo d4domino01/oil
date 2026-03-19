@@ -130,6 +130,85 @@ if signals_df.empty:
     st.stop()
 
 # ==============================
+# SIGNAL EXPLANATION (NEW)
+# ==============================
+
+st.subheader("🧠 Signal Explanation")
+
+# Use same rows as signal logic
+y = data.iloc[-2]
+d = data.iloc[-3]
+
+explanation = []
+score_parts = []
+
+# --- USO ---
+if y["USO"] > d["USO"]:
+    explanation.append("✔ USO rising")
+    score_parts.append("+15 USO up")
+else:
+    explanation.append("✖ USO falling")
+    score_parts.append("-15 USO down")
+
+# --- XLE ---
+if y["XLE"] > d["XLE"]:
+    explanation.append("✔ XLE rising")
+    score_parts.append("+10 XLE up")
+else:
+    explanation.append("✖ XLE falling")
+    score_parts.append("-10 XLE down")
+
+# --- BWET / BNO ---
+bwet_change = (y["BWET"] - d["BWET"]) / d["BWET"]
+
+if bwet_change > 0.03:
+    explanation.append("✔ Strong oil move (BNO/BWET)")
+    score_parts.append("+5 oil strength")
+elif bwet_change < -0.03:
+    explanation.append("✖ Oil weakness")
+    score_parts.append("-5 oil weakness")
+else:
+    explanation.append("• Oil neutral")
+    score_parts.append("0 oil neutral")
+
+# --- MOMENTUM ---
+uso_change = abs((y["USO"] - d["USO"]) / d["USO"])
+
+if uso_change > 0.03:
+    explanation.append("✔ Strong momentum spike")
+    score_parts.append("+5 momentum")
+else:
+    explanation.append("• No strong momentum")
+    score_parts.append("0 momentum")
+
+# ==============================
+# DISPLAY
+# ==============================
+
+st.markdown("### 🔍 Why this signal?")
+
+for item in explanation:
+    st.write(item)
+
+st.markdown("### 📊 Score Breakdown")
+
+for part in score_parts:
+    st.write(part)
+
+# ==============================
+# FINAL DECISION LOGIC DISPLAY
+# ==============================
+
+st.markdown("### ⚙️ Decision Logic")
+
+if latest["action"] == "BUY":
+    st.success("BUY triggered: Score ≥ 75")
+elif latest["action"] == "EXIT":
+    st.warning("EXIT triggered: Score < 55")
+else:
+    st.info("HOLD: Score between 55 and 75")
+
+# ==============================
 # CURRENT SIGNAL (TODAY)
 # ==============================
 
