@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Strategy (FINAL — Backtest Matched)")
+st.title("🛢️ Oil Strategy (Final — Explained & Backtest Matched)")
 
 # ==============================
 # LOAD DATA (STOOQ)
@@ -28,7 +28,7 @@ def load_data():
     ).set_index("Date")["Close"]
 
     df = pd.concat([uso, xle, bno], axis=1)
-    df.columns = ["USO", "XLE", "BWET"]  # keep naming consistent
+    df.columns = ["USO", "XLE", "BWET"]
 
     df = df.sort_index().dropna()
 
@@ -81,7 +81,7 @@ def calculate_score(row, prev_row):
     return score
 
 # ==============================
-# SIGNAL ENGINE (CORRECT TIMING)
+# SIGNAL ENGINE (BACKTEST MATCH)
 # ==============================
 
 entry_threshold = 75
@@ -117,7 +117,7 @@ for i in range(3, len(data)):
         action = "HOLD"
 
     signals.append({
-        "date": t.name,  # execution date
+        "date": t.name,
         "score": score,
         "confidence": int(min(confidence, 100)),
         "action": action
@@ -128,100 +128,9 @@ signals_df = pd.DataFrame(signals)
 if signals_df.empty:
     st.error("❌ No signals generated")
     st.stop()
-# ==============================
-# SIGNAL EXPLANATION (NEW)
-# ==============================
-
-st.subheader("🧠 Signal Explanation")
-
-# Use same rows as signal logic
-y = data.iloc[-2]
-d = data.iloc[-3]
-
-explanation = []
-score_parts = []
-
-# --- USO ---
-if y["USO"] > d["USO"]:
-    explanation.append("✔ USO rising")
-    score_parts.append("+15 USO up")
-else:
-    explanation.append("✖ USO falling")
-    score_parts.append("-15 USO down")
-
-# --- XLE ---
-if y["XLE"] > d["XLE"]:
-    explanation.append("✔ XLE rising")
-    score_parts.append("+10 XLE up")
-else:
-    explanation.append("✖ XLE falling")
-    score_parts.append("-10 XLE down")
-
-# --- BWET / BNO ---
-bwet_change = (y["BWET"] - d["BWET"]) / d["BWET"]
-
-if bwet_change > 0.03:
-    explanation.append("✔ Strong oil move (BNO/BWET)")
-    score_parts.append("+5 oil strength")
-elif bwet_change < -0.03:
-    explanation.append("✖ Oil weakness")
-    score_parts.append("-5 oil weakness")
-else:
-    explanation.append("• Oil neutral")
-    score_parts.append("0 oil neutral")
-
-# --- MOMENTUM ---
-uso_change = abs((y["USO"] - d["USO"]) / d["USO"])
-
-if uso_change > 0.03:
-    explanation.append("✔ Strong momentum spike")
-    score_parts.append("+5 momentum")
-else:
-    explanation.append("• No strong momentum")
-    score_parts.append("0 momentum")
 
 # ==============================
-# DISPLAY
-# ==============================
-
-st.markdown("### 🔍 Why this signal?")
-
-for item in explanation:
-    st.write(item)
-
-st.markdown("### 📊 Score Breakdown")
-
-for part in score_parts:
-    st.write(part)
-
-# ==============================
-# FINAL DECISION LOGIC DISPLAY
-# ==============================
-
-st.markdown("### ⚙️ Decision Logic")
-
-if latest["action"] == "BUY":
-    st.success("BUY triggered: Score ≥ 75")
-elif latest["action"] == "EXIT":
-    st.warning("EXIT triggered: Score < 55")
-else:
-    st.info("HOLD: Score between 55 and 75")
-
-# ==============================
-# FINAL DECISION LOGIC DISPLAY
-# ==============================
-
-st.markdown("### ⚙️ Decision Logic")
-
-if latest["action"] == "BUY":
-    st.success("BUY triggered: Score ≥ 75")
-elif latest["action"] == "EXIT":
-    st.warning("EXIT triggered: Score < 55")
-else:
-    st.info("HOLD: Score between 55 and 75")
-
-# ==============================
-# CURRENT SIGNAL (TODAY)
+# CURRENT SIGNAL
 # ==============================
 
 latest = signals_df.iloc[-1]
@@ -235,21 +144,81 @@ col2.metric("Score", int(latest["score"]))
 col3.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# INTERPRETATION
+# SIGNAL EXPLANATION (NEW)
 # ==============================
 
-if latest["action"] == "BUY":
-    st.success("🚀 Enter trade at market open")
-elif latest["action"] == "EXIT":
-    st.warning("⚠️ Exit position at market open")
+st.subheader("🧠 Signal Explanation")
+
+y = data.iloc[-2]
+d = data.iloc[-3]
+
+explanation = []
+score_parts = []
+
+# USO
+if y["USO"] > d["USO"]:
+    explanation.append("✔ USO rising")
+    score_parts.append("+15 USO up")
 else:
-    st.info("⏳ No action — hold / stay out")
+    explanation.append("✖ USO falling")
+    score_parts.append("-15 USO down")
+
+# XLE
+if y["XLE"] > d["XLE"]:
+    explanation.append("✔ XLE rising")
+    score_parts.append("+10 XLE up")
+else:
+    explanation.append("✖ XLE falling")
+    score_parts.append("-10 XLE down")
+
+# BWET (BNO)
+bwet_change = (y["BWET"] - d["BWET"]) / d["BWET"]
+
+if bwet_change > 0.03:
+    explanation.append("✔ Strong oil move")
+    score_parts.append("+5 oil strength")
+elif bwet_change < -0.03:
+    explanation.append("✖ Oil weakness")
+    score_parts.append("-5 oil weakness")
+else:
+    explanation.append("• Oil neutral")
+    score_parts.append("0 oil neutral")
+
+# Momentum
+uso_change = abs((y["USO"] - d["USO"]) / d["USO"])
+
+if uso_change > 0.03:
+    explanation.append("✔ Strong momentum")
+    score_parts.append("+5 momentum")
+else:
+    explanation.append("• No momentum")
+    score_parts.append("0 momentum")
+
+# DISPLAY EXPLANATION
+st.markdown("### 🔍 Why this signal?")
+for item in explanation:
+    st.write(item)
+
+# SCORE BREAKDOWN
+st.markdown("### 📊 Score Breakdown")
+for part in score_parts:
+    st.write(part)
+
+# FINAL DECISION LOGIC
+st.markdown("### ⚙️ Decision Logic")
+
+if latest["action"] == "BUY":
+    st.success("BUY triggered: Score ≥ 75")
+elif latest["action"] == "EXIT":
+    st.warning("EXIT triggered: Score < 55")
+else:
+    st.info("HOLD: Score between 55 and 75")
 
 # ==============================
 # SIGNAL HISTORY
 # ==============================
 
-st.subheader("📅 Signal History (Execution Days)")
+st.subheader("📅 Signal History")
 st.dataframe(signals_df.tail(20))
 
 # ==============================
@@ -267,10 +236,10 @@ else:
     st.success("✅ Data is up to date")
 
 # ==============================
-# DEBUG (OPTIONAL)
+# DEBUG PANEL
 # ==============================
 
-with st.expander("🔍 Debug (Signal Inputs)"):
+with st.expander("🔍 Debug Data"):
     st.write("Yesterday (signal):")
     st.write(data.iloc[-2])
 
