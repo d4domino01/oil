@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("🛢️ Oil Strategy (Stooq Version — Stable)")
+st.title("🛢️ Oil Strategy (FINAL — Backtest Matched)")
 
 # ==============================
 # LOAD DATA (STOOQ)
@@ -32,7 +32,7 @@ def load_data():
 
     df = df.sort_index().dropna()
 
-    # SHIFT (NO LOOKAHEAD)
+    # SHIFT (REMOVE LOOKAHEAD)
     df["USO_prev"] = df["USO"].shift(1)
     df["XLE_prev"] = df["XLE"].shift(1)
     df["BWET_prev"] = df["BWET"].shift(1)
@@ -81,7 +81,7 @@ def calculate_score(row, prev_row):
     return score
 
 # ==============================
-# SIGNAL ENGINE
+# SIGNAL ENGINE (CORRECT TIMING)
 # ==============================
 
 entry_threshold = 75
@@ -89,9 +89,10 @@ exit_threshold = 55
 
 signals = []
 
-for i in range(2, len(data)):
-    y = data.iloc[i-1]
-    d = data.iloc[i-2]
+for i in range(3, len(data)):
+    t = data.iloc[i]       # TODAY (execution)
+    y = data.iloc[i-1]     # YESTERDAY (signal)
+    d = data.iloc[i-2]     # DAY BEFORE
 
     score = calculate_score(
         pd.Series({
@@ -116,7 +117,7 @@ for i in range(2, len(data)):
         action = "HOLD"
 
     signals.append({
-        "date": data.index[i],
+        "date": t.name,  # execution date
         "score": score,
         "confidence": int(min(confidence, 100)),
         "action": action
@@ -129,12 +130,12 @@ if signals_df.empty:
     st.stop()
 
 # ==============================
-# CURRENT SIGNAL
+# CURRENT SIGNAL (TODAY)
 # ==============================
 
 latest = signals_df.iloc[-1]
 
-st.markdown("## 🛢️ TODAY’S SIGNAL")
+st.markdown("## 🛢️ TODAY’S TRADE DECISION")
 
 col1, col2, col3 = st.columns(3)
 
@@ -147,17 +148,17 @@ col3.metric("Confidence", f"{latest['confidence']}%")
 # ==============================
 
 if latest["action"] == "BUY":
-    st.success("🚀 Enter trade")
+    st.success("🚀 Enter trade at market open")
 elif latest["action"] == "EXIT":
-    st.warning("⚠️ Exit position")
+    st.warning("⚠️ Exit position at market open")
 else:
-    st.info("⏳ Hold")
+    st.info("⏳ No action — hold / stay out")
 
 # ==============================
-# HISTORY
+# SIGNAL HISTORY
 # ==============================
 
-st.subheader("📅 Signal History")
+st.subheader("📅 Signal History (Execution Days)")
 st.dataframe(signals_df.tail(20))
 
 # ==============================
@@ -167,9 +168,20 @@ st.dataframe(signals_df.tail(20))
 st.subheader("📊 Data Status")
 
 latest_date = data.index[-1]
-st.write(f"Latest data: {latest_date}")
+st.write(f"Latest data available: {latest_date}")
 
 if (datetime.now() - latest_date).days > 3:
-    st.warning("⚠️ Data may be outdated")
+    st.warning("⚠️ Data may be slightly delayed")
 else:
-    st.success("✅ Data is recent")
+    st.success("✅ Data is up to date")
+
+# ==============================
+# DEBUG (OPTIONAL)
+# ==============================
+
+with st.expander("🔍 Debug (Signal Inputs)"):
+    st.write("Yesterday (signal):")
+    st.write(data.iloc[-2])
+
+    st.write("Day before:")
+    st.write(data.iloc[-3])
