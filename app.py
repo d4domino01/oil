@@ -144,19 +144,32 @@ col2.metric("Score", int(latest["score"]))
 col3.metric("Confidence", f"{latest['confidence']}%")
 
 # ==============================
-# SIGNAL EXPLANATION (NEW)
+# SIGNAL EXPLANATION (FIXED)
 # ==============================
 
 st.subheader("🧠 Signal Explanation")
 
+# IMPORTANT: use SAME DATA as scoring
 y = data.iloc[-2]
 d = data.iloc[-3]
+
+y_prev = pd.Series({
+    "USO": y["USO_prev"],
+    "XLE": y["XLE_prev"],
+    "BWET": y["BWET_prev"]
+})
+
+d_prev = pd.Series({
+    "USO": d["USO_prev"],
+    "XLE": d["XLE_prev"],
+    "BWET": d["BWET_prev"]
+})
 
 explanation = []
 score_parts = []
 
 # USO
-if y["USO"] > d["USO"]:
+if y_prev["USO"] > d_prev["USO"]:
     explanation.append("✔ USO rising")
     score_parts.append("+15 USO up")
 else:
@@ -164,15 +177,15 @@ else:
     score_parts.append("-15 USO down")
 
 # XLE
-if y["XLE"] > d["XLE"]:
+if y_prev["XLE"] > d_prev["XLE"]:
     explanation.append("✔ XLE rising")
     score_parts.append("+10 XLE up")
 else:
     explanation.append("✖ XLE falling")
     score_parts.append("-10 XLE down")
 
-# BWET (BNO)
-bwet_change = (y["BWET"] - d["BWET"]) / d["BWET"]
+# BWET
+bwet_change = (y_prev["BWET"] - d_prev["BWET"]) / d_prev["BWET"]
 
 if bwet_change > 0.03:
     explanation.append("✔ Strong oil move")
@@ -185,7 +198,7 @@ else:
     score_parts.append("0 oil neutral")
 
 # Momentum
-uso_change = abs((y["USO"] - d["USO"]) / d["USO"])
+uso_change = abs((y_prev["USO"] - d_prev["USO"]) / d_prev["USO"])
 
 if uso_change > 0.03:
     explanation.append("✔ Strong momentum")
@@ -194,25 +207,14 @@ else:
     explanation.append("• No momentum")
     score_parts.append("0 momentum")
 
-# DISPLAY EXPLANATION
+# DISPLAY
 st.markdown("### 🔍 Why this signal?")
 for item in explanation:
     st.write(item)
 
-# SCORE BREAKDOWN
 st.markdown("### 📊 Score Breakdown")
 for part in score_parts:
     st.write(part)
-
-# FINAL DECISION LOGIC
-st.markdown("### ⚙️ Decision Logic")
-
-if latest["action"] == "BUY":
-    st.success("BUY triggered: Score ≥ 75")
-elif latest["action"] == "EXIT":
-    st.warning("EXIT triggered: Score < 55")
-else:
-    st.info("HOLD: Score between 55 and 75")
 
 # ==============================
 # SIGNAL HISTORY
